@@ -24,6 +24,10 @@ A frontend or launcher that heimspiel writes the Library into so it can be brows
 there, such as ES-DE, and later Steam or Playnite.
 _Avoid_: target, exporter, frontend (when the written result is meant)
 
+**Platform**:
+The console or computer a game was made for, such as Nintendo 64 or Game Boy Advance.
+_Avoid_: system (ES-DE's word for its menu of a Platform), console, core
+
 **Placeholder**:
 A stand-in that represents an Entry in an Output while the Entry's file is not on this machine yet.
 _Avoid_: stub, dummy, shortcut

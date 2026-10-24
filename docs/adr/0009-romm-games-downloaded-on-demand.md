@@ -2,8 +2,7 @@
 
 Entries from RomM appear in ES-DE as Placeholders with full metadata and covers; ES-DE's blocking
 `game-start` script swaps in the real file from a size-limited local cache right before launch. A large
-RomM library thus costs no disk space until a game is played. heimspiel's own RomM client builds on the
-`romm-api` crate.
+RomM library thus costs no disk space until a game is played. The RomM client is our own (ADR 0010).
 
 ## Considered Options
 

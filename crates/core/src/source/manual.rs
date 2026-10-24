@@ -31,6 +31,7 @@ pub fn entries(files: &[PathBuf]) -> anyhow::Result<Vec<Entry>> {
                 },
                 cover: None,
                 metadata: Default::default(),
+                identity: Default::default(),
             })
         })
         .collect()

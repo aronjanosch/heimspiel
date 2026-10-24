@@ -37,6 +37,7 @@ pub fn entries(folders: &[PathBuf]) -> anyhow::Result<Vec<Entry>> {
                     },
                     cover: None,
                     metadata: Metadata::default(),
+                    identity: Default::default(),
                 });
             }
         }

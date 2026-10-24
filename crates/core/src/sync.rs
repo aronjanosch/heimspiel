@@ -9,6 +9,7 @@ use anyhow::{Context, bail};
 use crate::config::{Config, expand};
 use crate::library::{Library, SourceKind};
 use crate::output::esde::EsDe;
+use crate::port;
 use crate::romm::Romm;
 use crate::source::{heroic, local, manual, romm, steam};
 
@@ -19,6 +20,8 @@ pub struct Env {
     pub config_dir: PathBuf,
     /// `~/.cache/heimspiel`
     pub cache_dir: PathBuf,
+    /// `~/.local/share/heimspiel`
+    pub data_dir: PathBuf,
     /// Command line that runs this heimspiel binary, for the ES-DE hook.
     pub heimspiel: Vec<String>,
 }
@@ -27,6 +30,11 @@ impl Env {
     /// Where the `game-start` hook keeps games fetched from RomM.
     pub fn game_cache(&self) -> PathBuf {
         self.cache_dir.join("romm/games")
+    }
+
+    /// heimspiel's own Quiver installation.
+    pub fn quiver_dir(&self) -> PathBuf {
+        self.data_dir.join("quiver")
     }
 }
 
@@ -38,6 +46,7 @@ pub struct Report {
     pub manual: usize,
     pub romm: usize,
     pub local: usize,
+    pub ports: usize,
     /// Sources that were skipped, and why.
     pub notes: Vec<String>,
 }
@@ -112,6 +121,10 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
         )?);
     }
 
+    // Ports find their Originals among the RomM games.
+    let ports = port::entries(&port::builtin(), &library, &env.heimspiel);
+    library.entries.extend(ports);
+
     let local_folders: Vec<PathBuf> = config
         .local
         .folders
@@ -127,6 +140,7 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
             SourceKind::Manual => report.manual += 1,
             SourceKind::RomM => report.romm += 1,
             SourceKind::Local => report.local += 1,
+            SourceKind::Port => report.ports += 1,
         }
     }
     let esde = local_folders.iter().fold(

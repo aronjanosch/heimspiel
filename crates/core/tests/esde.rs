@@ -47,6 +47,7 @@ fn steam(id: &str, title: &str) -> Entry {
         },
         cover: None,
         metadata: Default::default(),
+        identity: Default::default(),
     }
 }
 
@@ -62,6 +63,7 @@ fn romm(rom_id: u64, platform: &str, file_name: &str, title: &str) -> Entry {
         },
         cover: None,
         metadata: Metadata::default(),
+        identity: Default::default(),
     }
 }
 
@@ -199,6 +201,7 @@ fn gives_entries_with_the_same_title_their_own_files() {
         },
         cover: None,
         metadata: Default::default(),
+        identity: Default::default(),
     };
     let lib = library(vec![heroic("gog:1"), heroic("legendary:2")]);
 
@@ -367,6 +370,7 @@ fn links_local_games_and_removes_only_the_link() {
         },
         cover: None,
         metadata: Metadata::default(),
+        identity: Default::default(),
     };
 
     esde.write(&library(vec![mario.clone()])).unwrap();

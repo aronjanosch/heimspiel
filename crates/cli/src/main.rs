@@ -1,12 +1,17 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::{Command as Process, Stdio};
+use std::time::Duration;
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heimspiel_core::cache::GameCache;
-use heimspiel_core::config::Config;
-use heimspiel_core::hook::{self, GameStart};
+use heimspiel_core::config::{Config, RommConfig};
+use heimspiel_core::fetch::Fetch;
+use heimspiel_core::hook;
+use heimspiel_core::launch::{self, PortLaunch};
+use heimspiel_core::port;
+use heimspiel_core::quiver::Quiver;
 use heimspiel_core::romm::Romm;
 use heimspiel_core::sync::{self, Env};
 
@@ -25,10 +30,13 @@ struct Cli {
 enum Command {
     /// Read all Sources and write the Library into ES-DE. Run it while ES-DE is closed.
     Sync,
-    /// Launch an Entry; ES-DE calls this with the path of the game file (%ROM%).
+    /// Install, provision and run a Port; the entries `heimspiel sync` writes call this.
     Launch {
-        /// Path of the game file or Placeholder, as passed by ES-DE.
-        rom: PathBuf,
+        /// The Port, e.g. `zelda64recomp`.
+        port: String,
+        /// RomM id of the Original.
+        #[arg(long)]
+        romm: u64,
     },
     /// Handle an ES-DE event; called by the scripts `heimspiel sync` installs.
     #[command(hide = true)]
@@ -68,6 +76,7 @@ fn main() -> anyhow::Result<()> {
     let env = Env {
         config_dir: xdg("XDG_CONFIG_HOME", ".config"),
         cache_dir: xdg("XDG_CACHE_HOME", ".cache"),
+        data_dir: xdg("XDG_DATA_HOME", ".local/share"),
         heimspiel,
         user_home: user_home.clone(),
     };
@@ -79,32 +88,66 @@ fn main() -> anyhow::Result<()> {
         Command::Sync => {
             let report = sync::sync(&config, &env)?;
             println!(
-                "Synced {} Steam, {} Heroic, {} manual, {} RomM and {} local games into ES-DE.",
-                report.steam, report.heroic, report.manual, report.romm, report.local
+                "Synced {} Steam, {} Heroic, {} manual, {} RomM, {} local games and {} Ports into ES-DE.",
+                report.steam, report.heroic, report.manual, report.romm, report.local, report.ports
             );
             for note in report.notes {
                 println!("{note}");
             }
             Ok(())
         }
-        Command::Launch { .. } => bail!("`heimspiel launch` is not implemented yet"),
+        Command::Launch { port, romm: rom_id } => {
+            let romm = config
+                .romm
+                .as_ref()
+                .context("Ports need [romm] in the config")?;
+            let (client, cache) = romm_access(romm, &env)?;
+            let fetch = fetch(&client, &cache);
+            let quiver = Quiver::new(&env.quiver_dir());
+            let config_home = env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| user_home.join(".config"));
+            let ctx = PortLaunch {
+                manifests: &port::builtin(),
+                quiver: &quiver,
+                fetch: &fetch,
+                config_home: &config_home,
+                install_timeout: Duration::from_secs(30 * 60),
+            };
+            let result = quiver
+                .ensure_installed()
+                .and_then(|_| launch::run(&ctx, &port, rom_id));
+            // ES-DE shows nothing when a launch fails.
+            if let Err(e) = &result {
+                notify(&format!("Could not start {port}: {e:#}"));
+            }
+            result
+        }
         Command::Hook {
             event: Event::GameStart { args },
         } => {
             let Some(romm) = &config.romm else {
                 return Ok(());
             };
-            let token = sync::read_token(&romm.token_file(&user_home, &env.config_dir))?;
-            let client = Romm::new(&romm.url, &token);
-            let cache = GameCache::new(&env.game_cache(), romm.cache_limit_bytes());
-            let ctx = GameStart {
-                client: &client,
-                cache: &cache,
-                notify: &notify,
-                notify_from_bytes: 64 << 20,
-            };
-            hook::game_start(&ctx, &args)
+            let (client, cache) = romm_access(romm, &env)?;
+            hook::game_start(&fetch(&client, &cache), &args)
         }
+    }
+}
+
+fn romm_access(romm: &RommConfig, env: &Env) -> anyhow::Result<(Romm, GameCache)> {
+    let token = sync::read_token(&romm.token_file(&env.user_home, &env.config_dir))?;
+    let client = Romm::new(&romm.url, &token);
+    let cache = GameCache::new(&env.game_cache(), romm.cache_limit_bytes());
+    Ok((client, cache))
+}
+
+fn fetch<'a>(client: &'a Romm, cache: &'a GameCache) -> Fetch<'a> {
+    Fetch {
+        client,
+        cache,
+        notify: &notify,
+        notify_from_bytes: 64 << 20,
     }
 }
 

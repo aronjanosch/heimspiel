@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use common::{FakeServer, Response};
 use heimspiel_core::cache::GameCache;
-use heimspiel_core::hook::{GameStart, game_start};
+use heimspiel_core::fetch::Fetch;
+use heimspiel_core::hook::game_start;
 use heimspiel_core::romm::Romm;
 
 const PLACEHOLDER: &str = "heimspiel-placeholder romm:3039\n";
@@ -50,7 +51,7 @@ fn setup() -> Setup {
 fn run(s: &Setup, server: &FakeServer, arg: &str, notify_from_bytes: u64) -> anyhow::Result<()> {
     let client = Romm::new(&server.url, "rmm_secret").backoff(Duration::ZERO);
     let notify = |text: &str| s.notes.borrow_mut().push(text.to_owned());
-    let ctx = GameStart {
+    let ctx = Fetch {
         client: &client,
         cache: &s.cache,
         notify: &notify,

@@ -327,6 +327,7 @@ fn system(entry: &Entry) -> String {
         (Launch::File { platform, .. }, _) => platform.as_str(),
         (_, SourceKind::Steam) => return "steam".into(),
         (_, SourceKind::Heroic) => return "epic".into(),
+        (_, SourceKind::Port) => return "ports".into(),
         (_, _) => return "desktop".into(),
     };
     // RomM platform slugs that ES-DE names differently; all others match.
@@ -353,6 +354,7 @@ fn desktop_file(entry: &Entry) -> String {
         SourceKind::Manual => "manual",
         SourceKind::RomM => "romm",
         SourceKind::Local => "local",
+        SourceKind::Port => "port",
     };
     let Launch::Command { exec, working_dir } = &entry.launch else {
         unreachable!("only Command Entries become .desktop files");

@@ -230,3 +230,23 @@ fn keeps_no_cover_that_is_not_an_image() {
         0
     );
 }
+
+#[test]
+fn passes_on_what_identifies_the_game() {
+    let body = r#"{"items": [
+        {"id": 3037, "fs_name": "MM (USA).n64", "name": "MM", "igdb_id": 1030, "regions": ["USA"], "revision": ""},
+        {"id": 3038, "fs_name": "OoT (USA) (Rev B).n64", "name": "OoT", "igdb_id": 1029, "regions": ["USA"], "revision": "B"}
+    ], "total": 2, "limit": 2, "offset": 0}"#;
+    let server = FakeServer::start(move |req| match req.path.as_str() {
+        "/api/platforms" => Response::json(PLATFORMS),
+        _ => Response::json(body),
+    });
+    let tmp = tempfile::tempdir().unwrap();
+
+    let entries = romm::entries(&client(&server), &["n64".into()], tmp.path()).unwrap();
+
+    assert_eq!(entries[0].identity.igdb_id, Some(1030));
+    assert_eq!(entries[0].identity.regions, ["USA"]);
+    assert_eq!(entries[0].identity.revision, None);
+    assert_eq!(entries[1].identity.revision.as_deref(), Some("B"));
+}

@@ -39,6 +39,7 @@ pub fn entries(config: &Path, command: &[String]) -> anyhow::Result<Vec<Entry>> 
                 },
                 cover: None,
                 metadata: Default::default(),
+                identity: Default::default(),
             });
         }
     }

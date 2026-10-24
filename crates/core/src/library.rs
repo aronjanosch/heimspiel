@@ -19,6 +19,7 @@ pub struct Entry {
     /// Local cover image, if the Source has one.
     pub cover: Option<PathBuf>,
     pub metadata: Metadata,
+    pub identity: Identity,
 }
 
 impl Entry {
@@ -69,6 +70,15 @@ pub struct Metadata {
     pub rating: Option<f32>,
 }
 
+/// What identifies the game itself across Sources, used to find the Original of a Port.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Identity {
+    pub igdb_id: Option<u64>,
+    pub regions: Vec<String>,
+    /// Revision of the release, e.g. `A` for "Rev A"; `None` for the first release.
+    pub revision: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SourceKind {
     Steam,
@@ -76,4 +86,6 @@ pub enum SourceKind {
     Manual,
     RomM,
     Local,
+    /// Ports matched against Originals in the Library.
+    Port,
 }

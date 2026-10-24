@@ -61,6 +61,7 @@ fn entry_from_manifest(text: &str, root: &Path, command: &str) -> Option<Entry> 
         id: appid.to_owned(),
         title: name.to_owned(),
         metadata: Default::default(),
+        identity: Default::default(),
     })
 }
 

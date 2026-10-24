@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::library::{Entry, FileLocation, Launch, Metadata, SourceKind};
+use crate::library::{Entry, FileLocation, Identity, Launch, Metadata, SourceKind};
 use crate::romm::{Rom, Romm};
 
 /// Files RomM keeps next to games that are not games: saves, screenshots, notes.
@@ -46,6 +46,11 @@ pub(crate) fn is_game(file_name: &str) -> bool {
 
 fn entry(rom: Rom, platform: &str, cover: Option<PathBuf>) -> Entry {
     let meta = rom.metadatum.unwrap_or_default();
+    let identity = Identity {
+        igdb_id: rom.igdb_id,
+        regions: rom.regions,
+        revision: rom.revision.filter(|r| !r.is_empty()),
+    };
     Entry {
         source: SourceKind::RomM,
         id: rom.id.to_string(),
@@ -64,6 +69,7 @@ fn entry(rom: Rom, platform: &str, cover: Option<PathBuf>) -> Entry {
             rating: meta.average_rating.map(|r| (r / 100.0) as f32),
             ..Metadata::default()
         },
+        identity,
     }
 }
 

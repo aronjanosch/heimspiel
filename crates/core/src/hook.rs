@@ -12,69 +12,28 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 
 use crate::cache::GameCache;
-use crate::romm::Romm;
+use crate::fetch::Fetch;
 
 /// First line of the Placeholders the ES-DE output writes for RomM games.
 const PLACEHOLDER: &str = "heimspiel-placeholder romm:";
 
-pub struct GameStart<'a> {
-    pub client: &'a Romm,
-    pub cache: &'a GameCache,
-    /// Shows a message to the user, e.g. as a desktop notification.
-    pub notify: &'a dyn Fn(&str),
-    /// Downloads from this size on are announced through `notify`.
-    pub notify_from_bytes: u64,
-}
-
-pub fn game_start(ctx: &GameStart, args: &[String]) -> anyhow::Result<()> {
+pub fn game_start(fetch: &Fetch, args: &[String]) -> anyhow::Result<()> {
     let Some(first) = args.first() else {
         return Ok(());
     };
     let path = PathBuf::from(unescape(first));
-    let Some(rom_id) = romm_game(&path, ctx.cache) else {
+    let Some(rom_id) = romm_game(&path, fetch.cache) else {
         return Ok(());
     };
     if let Ok(target) = fs::read_link(&path)
         && let Some(name) = target.file_name().and_then(|n| n.to_str())
-        && ctx.cache.get(rom_id, name).is_some()
+        && fetch.cache.get(rom_id, name).is_some()
     {
         return Ok(());
     }
-
-    let rom = ctx.client.rom(rom_id)?;
-    let fail = |e: anyhow::Error| {
-        (ctx.notify)(&format!("Could not download {}: {e:#}", rom.name));
-        e
-    };
-    if rom.has_multiple_files {
-        return Err(fail(anyhow::anyhow!(
-            "games made of several files are not supported yet"
-        )));
-    }
-    let large = rom.fs_size_bytes >= ctx.notify_from_bytes;
-    if large {
-        (ctx.notify)(&format!(
-            "Downloading {} ({}) …",
-            rom.name,
-            size(rom.fs_size_bytes)
-        ));
-    }
-    let file = match ctx.cache.get(rom.id, &rom.fs_name) {
-        Some(file) => file,
-        None => ctx
-            .cache
-            .store(rom.id, &rom.fs_name, rom.fs_size_bytes, |part| {
-                ctx.client.download_rom(rom.id, &rom.fs_name, part)
-            })
-            .map_err(fail)?,
-    };
-    link(&path, &file).map_err(fail)?;
-    if large {
-        (ctx.notify)(&format!("{} is ready", rom.name));
-    }
-    Ok(())
+    let file = fetch.game(rom_id)?;
+    link(&path, &file)
 }
-
 /// The RomM id behind a game path: a Placeholder, or a link into the cache (even a dangling one).
 fn romm_game(path: &Path, cache: &GameCache) -> Option<u64> {
     let meta = fs::symlink_metadata(path).ok()?;
@@ -111,11 +70,4 @@ fn unescape(arg: &str) -> String {
         }
     }
     out
-}
-
-fn size(bytes: u64) -> String {
-    match bytes {
-        b if b >= 1 << 30 => format!("{:.1} GB", b as f64 / (1u64 << 30) as f64),
-        b => format!("{} MB", b.div_ceil(1 << 20)),
-    }
 }

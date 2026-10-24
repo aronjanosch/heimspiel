@@ -55,6 +55,13 @@ pub struct Rom {
     pub path_cover_large: Option<String>,
     #[serde(default)]
     pub metadatum: Option<RomMetadata>,
+    #[serde(default)]
+    pub igdb_id: Option<u64>,
+    #[serde(default)]
+    pub regions: Vec<String>,
+    /// Empty for the first release.
+    #[serde(default)]
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -1,0 +1,20 @@
+# Zelda 64: Recompiled, a native port of Majora's Mask (N64, USA 1.0).
+# Hash and game id: Zelda64Recomp src/main/main.cpp; verified in docs/research/2026-10-23-tests.md (test 4).
+id = "zelda64recomp"
+title = "Zelda 64: Recompiled"
+
+[quiver]
+name = "Zelda64Recomp"
+repository = "Zelda64Recomp/Zelda64Recomp"
+asset-filter = "Linux-X64.zip"
+
+[original]
+platform = "n64"
+igdb-id = 1030
+region = "USA"
+
+[provide]
+kind = "librecomp"
+config-dir = "Zelda64Recompiled"
+game-id = "mm.n64.us.1.0"
+xxh3 = "0xEF18B4A9E2386169"

@@ -67,7 +67,8 @@ fn entry(rom: Rom, platform: &str, cover: Option<PathBuf>) -> Entry {
 }
 
 fn cover(client: &Romm, rom: &Rom, cache: &Path) -> anyhow::Result<Option<PathBuf>> {
-    let Some(path) = &rom.path_cover_large else {
+    // RomM sends an empty path for games without a cover.
+    let Some(path) = rom.path_cover_large.as_deref().filter(|p| !p.is_empty()) else {
         return Ok(None);
     };
     let file_part = path.split('?').next().unwrap_or(path);
@@ -79,7 +80,10 @@ fn cover(client: &Romm, rom: &Rom, cache: &Path) -> anyhow::Result<Option<PathBu
     let target = cache.join(format!("{}.{ext}", rom.id));
     if !target.exists() {
         fs::create_dir_all(cache).with_context(|| format!("creating {}", cache.display()))?;
-        client.download_media(path, &target)?;
+        // A broken cover is no reason to drop the game; ES-DE's scraper can still find one.
+        if client.download_media(path, &target).is_err() {
+            return Ok(None);
+        }
     }
     Ok(Some(target))
 }

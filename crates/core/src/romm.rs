@@ -160,7 +160,8 @@ impl Romm {
         Ok(())
     }
 
-    /// Downloads a media file (cover, screenshot) by its server path to `dest`.
+    /// Downloads an image (cover, screenshot) by its server path to `dest`. Fails on anything
+    /// that is not an image, such as the web frontend's index page.
     pub fn download_media(&self, path: &str, dest: &Path) -> anyhow::Result<()> {
         if let Some(last) = self.last_media.get() {
             let wait = self.media_interval.saturating_sub(last.elapsed());
@@ -175,6 +176,11 @@ impl Romm {
             fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
         io::copy(&mut response.body_mut().as_reader(), &mut file)
             .with_context(|| format!("downloading {path}"))?;
+        drop(file);
+        if !is_image(&tmp) {
+            let _ = fs::remove_file(&tmp);
+            bail!("{path} is not an image");
+        }
         fs::rename(&tmp, dest).with_context(|| format!("replacing {}", dest.display()))?;
         Ok(())
     }
@@ -226,6 +232,20 @@ impl Romm {
         }
         Err(last_error)
     }
+}
+
+/// Checks the signature of PNG, JPEG, WebP and GIF files.
+fn is_image(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 12];
+    let Ok(n) = fs::File::open(path).and_then(|mut f| f.read(&mut head)) else {
+        return false;
+    };
+    let head = &head[..n];
+    head.starts_with(b"\x89PNG\r\n\x1a\n")
+        || head.starts_with(&[0xFF, 0xD8, 0xFF])
+        || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP"))
+        || head.starts_with(b"GIF8")
 }
 
 /// Encodes everything but RFC 3986's unreserved characters, for a file name in a URL path.

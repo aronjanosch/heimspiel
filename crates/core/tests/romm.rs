@@ -13,6 +13,9 @@ const PLATFORMS: &str = r#"[
     {"id": 195, "slug": "gba", "fs_slug": "gba", "name": "Game Boy Advance", "rom_count": 1}
 ]"#;
 
+/// The signature of a PNG file.
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+
 fn rom(id: u64, fs_name: &str, name: &str) -> String {
     format!(
         r#"{{"id": {id}, "platform_id": 52, "platform_slug": "n64", "fs_name": "{fs_name}",
@@ -140,7 +143,7 @@ fn downloads_each_cover_once_into_the_cache() {
         "/api/platforms" => Response::json(PLATFORMS),
         p if p.starts_with("/assets/romm/resources/roms/52/7/cover/big.png") => Response {
             status: 200,
-            body: b"png".to_vec(),
+            body: PNG.to_vec(),
         },
         _ => Response::json(body),
     });
@@ -151,7 +154,7 @@ fn downloads_each_cover_once_into_the_cache() {
     let second = romm::entries(&romm_client, &["n64".into()], tmp.path()).unwrap();
 
     let cover = first[0].cover.clone().unwrap();
-    assert_eq!(std::fs::read(&cover).unwrap(), b"png");
+    assert_eq!(std::fs::read(&cover).unwrap(), PNG);
     assert_eq!(cover.extension().unwrap(), "png");
     assert_eq!(second[0].cover, Some(cover));
     let cover_requests = server
@@ -185,4 +188,45 @@ fn gives_up_with_an_error_that_does_not_reveal_the_token() {
     let message = format!("{err:#}");
     assert!(message.contains("503"), "{message}");
     assert!(!message.contains("rmm_secret"));
+}
+
+#[test]
+fn treats_an_empty_cover_path_as_no_cover() {
+    let body = r#"{"items": [{"id": 7, "platform_id": 52, "fs_name": "A.z64", "name": "A", "summary": null,
+        "metadatum": null, "path_cover_large": ""}], "total": 1, "limit": 2, "offset": 0}"#;
+    let server = FakeServer::start(move |req| match req.path.as_str() {
+        "/api/platforms" => Response::json(PLATFORMS),
+        p if p.starts_with("/api/roms?") => Response::json(body),
+        _ => Response::json("<!doctype html>"),
+    });
+    let tmp = tempfile::tempdir().unwrap();
+
+    let entries = romm::entries(&client(&server), &["n64".into()], tmp.path()).unwrap();
+
+    assert_eq!(entries[0].cover, None);
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
+fn keeps_no_cover_that_is_not_an_image() {
+    let body = r#"{"items": [{"id": 7, "platform_id": 52, "fs_name": "A.z64", "name": "A", "summary": null,
+        "metadatum": null, "path_cover_large": "/assets/romm/resources/roms/52/7/cover/big.png"}],
+        "total": 1, "limit": 2, "offset": 0}"#;
+    let server = FakeServer::start(move |req| match req.path.as_str() {
+        "/api/platforms" => Response::json(PLATFORMS),
+        p if p.starts_with("/api/roms?") => Response::json(body),
+        // A web frontend answering every unknown path with its index page.
+        _ => Response::json("<!doctype html><html></html>"),
+    });
+    let tmp = tempfile::tempdir().unwrap();
+
+    let entries = romm::entries(&client(&server), &["n64".into()], tmp.path()).unwrap();
+
+    assert_eq!(entries[0].cover, None);
+    assert_eq!(
+        std::fs::read_dir(tmp.path())
+            .map(|d| d.count())
+            .unwrap_or(0),
+        0
+    );
 }

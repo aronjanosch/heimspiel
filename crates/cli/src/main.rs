@@ -9,7 +9,7 @@ use heimspiel_core::cache::GameCache;
 use heimspiel_core::config::{Config, RommConfig};
 use heimspiel_core::fetch::Fetch;
 use heimspiel_core::hook;
-use heimspiel_core::launch::{self, PortLaunch};
+use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
 use heimspiel_core::port;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::{self, Quiver};
@@ -32,12 +32,19 @@ enum Command {
     /// Read all Sources and write the Library into ES-DE. Run it while ES-DE is closed.
     Sync,
     /// Install, provision and run a Port; the entries `heimspiel sync` writes call this.
+    #[command(group = clap::ArgGroup::new("original").required(true))]
     Launch {
         /// The Port, e.g. `zelda64recomp`.
         port: String,
         /// RomM id of the Original.
+        #[arg(long, group = "original")]
+        romm: Option<u64>,
+        /// Folder of the Dump that is the Original.
+        #[arg(long, group = "original")]
+        dump: Option<PathBuf>,
+        /// The game to start, for Ports with several, e.g. `u1`.
         #[arg(long)]
-        romm: u64,
+        game: Option<String>,
     },
     /// Handle an ES-DE event; called by the scripts `heimspiel sync` installs.
     #[command(hide = true)]
@@ -97,13 +104,22 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Launch { port, romm: rom_id } => {
-            let romm = config
-                .romm
-                .as_ref()
-                .context("Ports need [romm] in the config")?;
-            let (client, cache) = romm_access(romm, &env)?;
-            let fetch = fetch(&client, &cache);
+        Command::Launch {
+            port,
+            romm: rom_id,
+            dump,
+            game,
+        } => {
+            let original = match (rom_id, dump) {
+                (Some(rom_id), _) => OriginalLocation::RomM(rom_id),
+                (None, Some(dump)) => OriginalLocation::Dump(std::path::absolute(dump)?),
+                (None, None) => unreachable!("clap requires one"),
+            };
+            let romm = match &config.romm {
+                Some(romm) => Some(romm_access(romm, &env)?),
+                None => None,
+            };
+            let fetch = romm.as_ref().map(|(client, cache)| fetch(client, cache));
             let quiver = Quiver::new(&env.quiver_dir());
             let base = |var: &str, fallback: &str| {
                 env::var_os(var)
@@ -117,14 +133,15 @@ fn main() -> anyhow::Result<()> {
             let ctx = PortLaunch {
                 manifests: &port::builtin(),
                 quiver: &quiver,
-                fetch: &fetch,
+                fetch: fetch.as_ref(),
+                notify: &notify,
                 homes: &homes,
                 install_timeout: Duration::from_secs(30 * 60),
                 latest_version: &|app| quiver::latest_tag(&app.repository),
             };
             let result = quiver
                 .ensure_installed()
-                .and_then(|_| launch::run(&ctx, &port, rom_id));
+                .and_then(|_| launch::run(&ctx, &port, &original, game.as_deref()));
             // ES-DE shows nothing when a launch fails.
             if let Err(e) = &result {
                 notify(&format!("Could not start {port}: {e:#}"));

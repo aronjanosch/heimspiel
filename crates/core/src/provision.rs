@@ -73,7 +73,49 @@ pub fn provide(
             let _ = fs::remove_file(&rom_file);
             result
         }
+        Provide::Dump { .. } => bail!("this Port needs a Dump, not a ROM"),
     }
+}
+
+/// Provisions a Dump for a Port of kind `dump`: writes the Dump's folder and the chosen `game`
+/// into the launcher's settings in the Port's Proton prefix (`prefix`, Proton's compat data
+/// folder), keeping the user's other settings. Proton fills a prefix it creates around files that
+/// are already there, so this also works before the Port's first start.
+pub fn provide_dump(
+    spec: &Provide,
+    prefix: &Path,
+    dump: &Path,
+    game: Option<&str>,
+) -> anyhow::Result<()> {
+    let Provide::Dump {
+        settings,
+        game_dir_key,
+        game_key,
+        set,
+    } = spec
+    else {
+        bail!("this Port needs a ROM, not a Dump");
+    };
+    let file = prefix
+        .join("pfx/drive_c/users/steamuser/AppData/Roaming")
+        .join(settings);
+    let mut doc: serde_json::Map<String, serde_json::Value> = match fs::read_to_string(&file) {
+        Ok(text) => {
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", file.display()))?
+        }
+        Err(_) => Default::default(),
+    };
+    // Proton maps the Linux root to drive Z:.
+    let windows_path = format!("Z:{}", dump.to_string_lossy().replace('/', "\\"));
+    doc.insert(game_dir_key.clone(), windows_path.into());
+    if let (Some(key), Some(game)) = (game_key, game) {
+        doc.insert(key.clone(), game.into());
+    }
+    doc.extend(set.clone());
+    write_atomically(
+        &file,
+        (serde_json::to_string_pretty(&doc)? + "\n").as_bytes(),
+    )
 }
 
 /// Fetches the Original and brings it into big-endian order, padded to whole words.

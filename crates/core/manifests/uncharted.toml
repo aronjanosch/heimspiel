@@ -1,0 +1,40 @@
+# Uncharted: The Nathan Drake Collection, a native port of the PS4 game code (Supermedo/uncharted_pc,
+# GPL-2.0). Only a Windows build exists; it runs under Proton. "Play Uncharted.exe" starts the game
+# chosen in the launcher's settings without showing the launcher
+# (docs/research/2026-10-24-uncharted.md).
+# Accepted Dumps: the port's README names CUSA02343 (US) and CUSA02320 (EU), tested with
+# CUSA02320 01.00.
+id = "uncharted"
+title = "Uncharted: The Nathan Drake Collection"
+
+[quiver]
+name = "UnchartedNDC"
+repository = "Supermedo/uncharted_pc"
+asset-filter = "uncharted-windows.zip"
+runner = "proton"
+executable = "Play Uncharted.exe"
+
+[original]
+platform = "ps4"
+title-ids = ["CUSA02320", "CUSA02343"]
+files = ["eboot.bin", "big2-ps4_Shipping.elf", "big3-ps4_Shipping.elf", "u1data", "u2data", "u3data"]
+
+[[games]]
+id = "u1"
+title = "Uncharted: Drake's Fortune"
+
+[[games]]
+id = "u2"
+title = "Uncharted 2: Among Thieves"
+
+[[games]]
+id = "u3"
+title = "Uncharted 3: Drake's Deception"
+
+[provide]
+kind = "dump"
+settings = "uncharted-launcher/settings.json"
+game-dir-key = "game_dir"
+game-key = "start"
+# heimspiel owns Port updates (ADR 0003); the launcher's own check would replace the build.
+set = { check_updates = false }

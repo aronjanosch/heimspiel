@@ -16,6 +16,15 @@ pub struct Config {
     pub manual: ManualConfig,
     pub romm: Option<RommConfig>,
     pub local: LocalConfig,
+    pub dumps: DumpsConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DumpsConfig {
+    /// Folders holding Dumps of the user's console games, one subfolder per Dump
+    /// (`<folder>/CUSA02320/sce_sys/param.sfo`), for the Ports that need them.
+    pub folders: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]

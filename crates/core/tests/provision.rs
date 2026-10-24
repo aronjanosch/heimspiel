@@ -178,3 +178,69 @@ fn keeps_an_existing_archive() {
 
     assert_eq!(fs::read(&archive).unwrap(), b"o2r");
 }
+
+fn launcher_spec() -> Provide {
+    Provide::Dump {
+        settings: "test-launcher/settings.json".into(),
+        game_dir_key: "game_dir".into(),
+        game_key: Some("start".into()),
+        set: [("check_updates".to_owned(), serde_json::Value::Bool(false))].into(),
+    }
+}
+
+const APPDATA: &str = "pfx/drive_c/users/steamuser/AppData/Roaming";
+
+#[test]
+fn points_the_launcher_to_the_dump_before_the_prefix_exists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let prefix = tmp.path().join("prefix");
+
+    provision::provide_dump(
+        &launcher_spec(),
+        &prefix,
+        Path::new("/mnt/games/ps4/CUSA02320"),
+        Some("u2"),
+    )
+    .unwrap();
+
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(prefix.join(APPDATA).join("test-launcher/settings.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        settings,
+        serde_json::json!({
+            "game_dir": "Z:\\mnt\\games\\ps4\\CUSA02320",
+            "start": "u2",
+            "check_updates": false,
+        })
+    );
+}
+
+#[test]
+fn keeps_the_users_other_launcher_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let prefix = tmp.path().join("prefix");
+    let file = prefix.join(APPDATA).join("test-launcher/settings.json");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(
+        &file,
+        r#"{"game_dir": "C:\\old", "start": "u1", "fullscreen": true, "check_updates": true}"#,
+    )
+    .unwrap();
+
+    provision::provide_dump(
+        &launcher_spec(),
+        &prefix,
+        Path::new("/games/CUSA02343"),
+        Some("u3"),
+    )
+    .unwrap();
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(settings["game_dir"], "Z:\\games\\CUSA02343");
+    assert_eq!(settings["start"], "u3");
+    assert_eq!(settings["fullscreen"], true);
+    assert_eq!(settings["check_updates"], false);
+}

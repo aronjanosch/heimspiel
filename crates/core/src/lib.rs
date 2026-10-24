@@ -5,6 +5,7 @@
 pub mod cache;
 pub mod config;
 pub mod desktop;
+pub mod dump;
 pub mod fetch;
 pub mod hook;
 pub mod launch;

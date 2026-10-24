@@ -10,3 +10,6 @@ only the unencrypted metadata, because the game data needs keys only a console c
   version) and explains what is missing otherwise.
 - heimspiel can still read title ID and version from a disc image or PKG without decrypting, to show the
   user that they own the game and which Dump the Port needs.
+- A PKG the user made decrypted on their own console is not a retail PKG: `ps4-pkg-tool` extracts it into a
+  complete Dump (docs/research/2026-10-24-uncharted.md). heimspiel may later offer that extraction; it still
+  never decrypts.

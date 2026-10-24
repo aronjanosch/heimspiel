@@ -1,10 +1,13 @@
 //! Ports and their Manifests. heimspiel ships the Manifests it knows in `manifests/`; a Port is
 //! offered once the Library holds its Original.
 
-use anyhow::Context;
+use std::collections::BTreeMap;
+
+use anyhow::{Context, bail};
 use serde::Deserialize;
 
 use crate::desktop;
+use crate::dump::Dump;
 use crate::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
 
 /// heimspiel's description of one Port.
@@ -15,7 +18,18 @@ pub struct Manifest {
     pub title: String,
     pub quiver: QuiverApp,
     pub original: Original,
+    /// The games of a Port that holds several, such as a collection; each becomes an Entry.
+    #[serde(default)]
+    pub games: Vec<Game>,
     pub provide: Provide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Game {
+    /// What the Port's launcher calls the game, e.g. `u1`.
+    pub id: String,
+    pub title: String,
 }
 
 /// How Quiver finds the Port's releases.
@@ -28,15 +42,70 @@ pub struct QuiverApp {
     pub repository: String,
     /// Substring (or glob) that picks the release asset for this system.
     pub asset_filter: String,
+    /// How a Windows build runs on Linux; native builds have none.
+    #[serde(default)]
+    pub runner: Option<Runner>,
+    /// The program to start, for releases with several; a path inside the release.
+    #[serde(default)]
+    pub executable: Option<String>,
 }
 
-/// The game a Port needs as its Original, and which of its releases it accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Runner {
+    Proton,
+}
+
+/// The game a Port needs as its Original, and which of its releases it accepts: a ROM release
+/// named by IGDB id, region and revision, or a Dump named by title IDs.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Original {
     pub platform: String,
-    pub igdb_id: u64,
+    #[serde(default)]
+    pub igdb_id: Option<u64>,
+    #[serde(default)]
     pub releases: Vec<Release>,
+    /// Title IDs of the accepted Dumps, e.g. `CUSA02320`.
+    #[serde(default)]
+    pub title_ids: Vec<String>,
+    /// Files and folders an accepted Dump must hold.
+    #[serde(default)]
+    pub files: Vec<String>,
+}
+
+impl Original {
+    /// Whether `dump` is a complete copy of an accepted title.
+    pub fn accepts(&self, dump: &Dump) -> bool {
+        self.check(dump).is_ok()
+    }
+
+    /// Explains why `dump` is not a complete copy of an accepted title.
+    pub fn check(&self, dump: &Dump) -> anyhow::Result<()> {
+        if dump.platform != self.platform || !self.title_ids.contains(&dump.title_id) {
+            bail!(
+                "{} is {} ({}); this Port needs {}",
+                dump.path.display(),
+                dump.title,
+                dump.title_id,
+                self.title_ids.join(" or ")
+            );
+        }
+        let missing: Vec<&str> = self
+            .files
+            .iter()
+            .filter(|f| !dump.path.join(f).exists())
+            .map(String::as_str)
+            .collect();
+        if !missing.is_empty() {
+            bail!(
+                "the Dump {} is incomplete; missing: {}",
+                dump.path.display(),
+                missing.join(", ")
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -72,6 +141,21 @@ pub enum Provide {
         /// SHA-1 of every accepted release, as big-endian ROM.
         sha1: Vec<String>,
     },
+    /// Ports that come with a launcher: heimspiel writes the Dump's folder and the chosen game into
+    /// the launcher's settings in the Port's Windows `%APPDATA%`, then the Port starts straight
+    /// into the game.
+    Dump {
+        /// The settings file, relative to `%APPDATA%`.
+        settings: String,
+        /// Settings key for the Dump's folder, as a Windows path.
+        game_dir_key: String,
+        /// Settings key for the game to start, for Ports with several games.
+        #[serde(default)]
+        game_key: Option<String>,
+        /// Further settings heimspiel fixes.
+        #[serde(default)]
+        set: BTreeMap<String, serde_json::Value>,
+    },
 }
 
 fn hex<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
@@ -90,6 +174,7 @@ pub fn builtin() -> Vec<Manifest> {
     const FILES: &[(&str, &str)] = &[
         ("banjorecomp", include_str!("../manifests/banjorecomp.toml")),
         ("soh", include_str!("../manifests/soh.toml")),
+        ("uncharted", include_str!("../manifests/uncharted.toml")),
         (
             "zelda64recomp",
             include_str!("../manifests/zelda64recomp.toml"),
@@ -105,31 +190,39 @@ pub fn builtin() -> Vec<Manifest> {
         .collect()
 }
 
-/// One Entry per Port whose Original is in the Library. `heimspiel` is the command line that runs
-/// heimspiel itself; the Entry launches through it.
-pub fn entries(manifests: &[Manifest], library: &Library, heimspiel: &[String]) -> Vec<Entry> {
-    manifests
-        .iter()
-        .filter_map(|manifest| {
-            let (original, rom_id) = library
-                .entries
-                .iter()
-                .find_map(|e| Some((e, romm_original(e, &manifest.original)?)))?;
+/// The Entries of every Port whose Original is in the Library or among the Dumps: one per Port,
+/// or one per game for a Port with several. `heimspiel` is the command line that runs heimspiel
+/// itself; the Entries launch through it.
+pub fn entries(
+    manifests: &[Manifest],
+    library: &Library,
+    dumps: &[Dump],
+    heimspiel: &[String],
+) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    for manifest in manifests {
+        let launch = |original: &[String], game: Option<&Game>| {
             let mut args = heimspiel.to_vec();
-            args.extend([
-                "launch".into(),
-                manifest.id.clone(),
-                "--romm".into(),
-                rom_id.to_string(),
-            ]);
-            Some(Entry {
+            args.extend(["launch".into(), manifest.id.clone()]);
+            args.extend_from_slice(original);
+            if let Some(game) = game {
+                args.extend(["--game".into(), game.id.clone()]);
+            }
+            Launch::Command {
+                exec: desktop::exec(&args),
+                working_dir: None,
+            }
+        };
+        if let Some((original, rom_id)) = library
+            .entries
+            .iter()
+            .find_map(|e| Some((e, romm_original(e, &manifest.original)?)))
+        {
+            entries.push(Entry {
                 source: SourceKind::Port,
                 id: manifest.id.clone(),
                 title: manifest.title.clone(),
-                launch: Launch::Command {
-                    exec: desktop::exec(&args),
-                    working_dir: None,
-                },
+                launch: launch(&["--romm".into(), rom_id.to_string()], None),
                 cover: original.cover.clone(),
                 metadata: Metadata {
                     description: Some(format!(
@@ -140,9 +233,36 @@ pub fn entries(manifests: &[Manifest], library: &Library, heimspiel: &[String]) 
                     ..original.metadata.clone()
                 },
                 identity: Default::default(),
-            })
-        })
-        .collect()
+            });
+        } else if let Some(dump) = dumps.iter().find(|d| manifest.original.accepts(d)) {
+            let original = ["--dump".into(), dump.path.to_string_lossy().into_owned()];
+            let icon = dump.path.join("sce_sys/icon0.png");
+            let entry = |id: String, title: &str, game: Option<&Game>| Entry {
+                source: SourceKind::Port,
+                id,
+                title: title.to_owned(),
+                launch: launch(&original, game),
+                cover: icon.is_file().then(|| icon.clone()),
+                metadata: Metadata {
+                    description: Some(format!(
+                        "A native PC port of {}. heimspiel installs it and points it to your Dump \
+                         on the first start.",
+                        dump.title
+                    )),
+                    ..Default::default()
+                },
+                identity: Default::default(),
+            };
+            if manifest.games.is_empty() {
+                entries.push(entry(manifest.id.clone(), &manifest.title, None));
+            }
+            for game in &manifest.games {
+                let id = format!("{}/{}", manifest.id, game.id);
+                entries.push(entry(id, &game.title, Some(game)));
+            }
+        }
+    }
+    entries
 }
 
 /// The RomM id of `entry` if it is the release `original` names.
@@ -157,7 +277,8 @@ fn romm_original(entry: &Entry, original: &Original) -> Option<u64> {
     };
     let id = &entry.identity;
     let matches = *platform == original.platform
-        && id.igdb_id == Some(original.igdb_id)
+        && original.igdb_id.is_some()
+        && id.igdb_id == original.igdb_id
         && original
             .releases
             .iter()

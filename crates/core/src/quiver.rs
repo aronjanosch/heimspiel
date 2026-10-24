@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
-use crate::port::QuiverApp;
+use crate::port::{QuiverApp, Runner};
 use crate::process::stop;
 
 pub const APPIMAGE: &str = "QuiverLauncher-linux-x64.AppImage";
@@ -106,6 +106,12 @@ impl Quiver {
             // An update check inside `--run` can hang like `--download`.
             "autoUpdate": false,
         });
+        if let Some(Runner::Proton) = app.runner {
+            // Quiver would otherwise pick its runner itself and keep the prefix inside the app
+            // folder; heimspiel needs to know where it is to provision the Original into it.
+            entry["linuxRunner"] = "proton".into();
+            entry["linuxPrefixPath"] = self.prefix(app).to_string_lossy().into();
+        }
         if let Some(pinned) = pinned {
             entry["preferredVersion"] = pinned;
         }
@@ -135,6 +141,30 @@ impl Quiver {
         });
         let program = programs.next()?;
         programs.next().is_none().then_some(program)
+    }
+
+    /// The Proton prefix (Proton's compat data folder) of a Windows Port.
+    pub fn prefix(&self, app: &QuiverApp) -> PathBuf {
+        self.dir.join("Prefixes").join(&app.name)
+    }
+
+    /// Notes the Manifest's program in `selected_executable.txt`; without the note Quiver's CLI
+    /// refuses to run a release with several programs.
+    pub fn select_executable(&self, app: &QuiverApp) -> anyhow::Result<()> {
+        let Some(executable) = &app.executable else {
+            return Ok(());
+        };
+        let folder = self.dir.join("Apps").join(&app.name);
+        let program = folder.join(executable);
+        if !program.is_file() {
+            bail!("{} has no {executable}", folder.display());
+        }
+        let note = folder.join("selected_executable.txt");
+        let text = program.to_string_lossy();
+        if fs::read_to_string(&note).is_ok_and(|n| n == text) {
+            return Ok(());
+        }
+        fs::write(&note, text.as_bytes()).with_context(|| format!("writing {}", note.display()))
     }
 
     pub fn is_installed(&self, app: &QuiverApp) -> bool {

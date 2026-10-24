@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 
 use crate::config::{Config, expand};
+use crate::dump;
 use crate::library::{Library, SourceKind};
 use crate::output::esde::EsDe;
 use crate::port;
@@ -121,8 +122,15 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
         )?);
     }
 
-    // Ports find their Originals among the RomM games.
-    let ports = port::entries(&port::builtin(), &library, &env.heimspiel);
+    // Ports find their Originals among the RomM games and the Dumps.
+    let dump_folders: Vec<PathBuf> = config
+        .dumps
+        .folders
+        .iter()
+        .map(|f| expand(f, user_home))
+        .collect();
+    let dumps = dump::dumps(&dump_folders)?;
+    let ports = port::entries(&port::builtin(), &library, &dumps, &env.heimspiel);
     library.entries.extend(ports);
 
     let local_folders: Vec<PathBuf> = config

@@ -36,7 +36,8 @@ _Avoid_: stub, dummy, shortcut
 
 **Port**:
 A native PC build of a console game, made by recompiling or decompiling the original, that only
-runs with data from an Original. Zelda64Recomp, Ship of Harkinian and SpartanPort are Ports.
+runs with data from an Original. Zelda64Recomp, Ship of Harkinian and SpartanPort are Ports. A Port
+of a collection holds several games and offers one Entry per game.
 _Avoid_: recomp, decomp, PC port (as separate concepts; they are kinds of Port)
 
 **Original**:

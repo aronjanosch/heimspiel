@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use common::{FakeServer, Response};
 use heimspiel_core::cache::GameCache;
 use heimspiel_core::fetch::Fetch;
-use heimspiel_core::launch::{self, PortLaunch};
+use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
 use heimspiel_core::port::Manifest;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::Quiver;
@@ -59,8 +59,8 @@ fn romm() -> FakeServer {
 /// like Quiver 3.5.1 does, unless `installs` is false.
 fn fake_quiver(dir: &Path, installs: bool) {
     let install = if installs {
-        // Copies a stand-in for the Port's program, if the test provides one.
-        r#"mkdir -p "$here/Apps/$2" && { [ ! -f "$here/port.sh" ] || cp "$here/port.sh" "$here/Apps/$2/port.appimage"; } && echo build > "$here/Apps/$2/installed-build.txt""#
+        // Copies a stand-in for the Port's program or release, if the test provides one.
+        r#"mkdir -p "$here/Apps/$2" && { [ ! -f "$here/port.sh" ] || cp "$here/port.sh" "$here/Apps/$2/port.appimage"; } && { [ ! -d "$here/release" ] || cp -r "$here/release/." "$here/Apps/$2/"; } && echo build > "$here/Apps/$2/installed-build.txt""#
     } else {
         ":"
     };
@@ -102,6 +102,24 @@ fn run_port(
     manifest: &Manifest,
     install_timeout: Duration,
 ) -> anyhow::Result<()> {
+    launch_with(
+        s,
+        server,
+        manifest,
+        &OriginalLocation::RomM(7),
+        None,
+        install_timeout,
+    )
+}
+
+fn launch_with(
+    s: &Setup,
+    server: &FakeServer,
+    manifest: &Manifest,
+    original: &OriginalLocation,
+    game: Option<&str>,
+    install_timeout: Duration,
+) -> anyhow::Result<()> {
     let client = Romm::new(&server.url, "rmm_secret").backoff(Duration::ZERO);
     let cache = GameCache::new(&s.tmp.path().join("cache"), 1 << 30);
     let fetch = Fetch {
@@ -118,12 +136,13 @@ fn run_port(
     let ctx = PortLaunch {
         manifests: std::slice::from_ref(manifest),
         quiver: &quiver,
-        fetch: &fetch,
+        fetch: Some(&fetch),
+        notify: &|_| {},
         homes: &homes,
         install_timeout,
         latest_version: &|_| Ok("1.0".into()),
     };
-    launch::run(&ctx, &manifest.id, 7)
+    launch::run(&ctx, &manifest.id, original, game)
 }
 
 fn calls(s: &Setup) -> Vec<String> {
@@ -249,4 +268,94 @@ sha1 = ["{:x}"]
 
     assert_eq!(fs::read(&archive).unwrap(), Z64);
     assert_eq!(calls(&s), ["--download TestShip", "--run TestShip"]);
+}
+
+fn collection() -> Manifest {
+    Manifest::parse(
+        r#"
+id = "testcollection"
+title = "Test Collection"
+[quiver]
+name = "TestCollection"
+repository = "test/collection"
+asset-filter = "windows.zip"
+runner = "proton"
+executable = "Play.exe"
+[original]
+platform = "ps4"
+title-ids = ["CUSA02320"]
+files = ["eboot.bin"]
+[[games]]
+id = "u2"
+title = "Test: Second"
+[provide]
+kind = "dump"
+settings = "test-launcher/settings.json"
+game-dir-key = "game_dir"
+game-key = "start"
+"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
+    let s = setup(true);
+    fs::create_dir_all(s.quiver_dir.join("release")).unwrap();
+    fs::write(s.quiver_dir.join("release/Play.exe"), b"MZ").unwrap();
+    fs::write(s.quiver_dir.join("release/Launcher.exe"), b"MZ").unwrap();
+    let dump = common::ps4_dump(s.tmp.path(), "CUSA02320", &["eboot.bin"]);
+    let server = romm();
+
+    launch_with(
+        &s,
+        &server,
+        &collection(),
+        &OriginalLocation::Dump(dump.clone()),
+        Some("u2"),
+        Duration::from_secs(20),
+    )
+    .unwrap();
+
+    assert_eq!(
+        calls(&s),
+        ["--download TestCollection", "--run TestCollection"]
+    );
+    let app = s.quiver_dir.join("Apps/TestCollection");
+    // With several programs in the release, Quiver's CLI runs only the one noted here.
+    assert_eq!(
+        fs::read_to_string(app.join("selected_executable.txt")).unwrap(),
+        app.join("Play.exe").to_string_lossy()
+    );
+    let apps: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(s.quiver_dir.join("apps.json")).unwrap()).unwrap();
+    let entry = &apps["apps"][0];
+    assert_eq!(entry["linuxRunner"], "proton");
+    let prefix = PathBuf::from(entry["linuxPrefixPath"].as_str().unwrap());
+    let settings = fs::read_to_string(
+        prefix.join("pfx/drive_c/users/steamuser/AppData/Roaming/test-launcher/settings.json"),
+    )
+    .unwrap();
+    assert!(settings.contains(r#""start": "u2""#), "{settings}");
+    assert!(settings.contains("CUSA02320"), "{settings}");
+}
+
+#[test]
+fn refuses_a_dump_the_port_does_not_accept() {
+    let s = setup(true);
+    let dump = common::ps4_dump(s.tmp.path(), "CUSA02320", &[]);
+    let server = romm();
+
+    let err = launch_with(
+        &s,
+        &server,
+        &collection(),
+        &OriginalLocation::Dump(dump),
+        Some("u2"),
+        Duration::from_secs(20),
+    )
+    .unwrap_err();
+
+    assert!(format!("{err:#}").contains("eboot.bin"), "{err:#}");
+    assert!(calls(&s).is_empty());
 }

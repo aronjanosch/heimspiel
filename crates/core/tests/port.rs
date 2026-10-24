@@ -1,5 +1,8 @@
+mod common;
+
 use std::path::PathBuf;
 
+use heimspiel_core::dump;
 use heimspiel_core::library::{
     Entry, FileLocation, Identity, Launch, Library, Metadata, SourceKind,
 };
@@ -57,7 +60,7 @@ fn offers_a_port_whose_original_is_in_the_library() {
         entries: vec![romm(3037, 1030, "USA", None)],
     };
 
-    let ports = port::entries(&[manifest], &library, &heimspiel());
+    let ports = port::entries(&[manifest], &library, &[], &heimspiel());
 
     assert_eq!(ports.len(), 1);
     let p = &ports[0];
@@ -82,7 +85,7 @@ fn needs_the_exact_release_of_the_original() {
         ],
     };
 
-    assert!(port::entries(&[manifest], &library, &heimspiel()).is_empty());
+    assert!(port::entries(&[manifest], &library, &[], &heimspiel()).is_empty());
 }
 
 #[test]
@@ -108,4 +111,68 @@ fn built_in_manifests_have_distinct_ids() {
     ids.dedup();
     assert_eq!(ids.len(), builtin.len());
     assert!(ids.contains(&"banjorecomp"));
+}
+
+const COLLECTION: &str = r#"
+id = "testcollection"
+title = "Test Collection"
+
+[quiver]
+name = "TestCollection"
+repository = "test/collection"
+asset-filter = "windows.zip"
+runner = "proton"
+executable = "Play.exe"
+
+[original]
+platform = "ps4"
+title-ids = ["CUSA02320", "CUSA02343"]
+files = ["eboot.bin", "u1data"]
+
+[[games]]
+id = "u1"
+title = "Test: First"
+
+[[games]]
+id = "u2"
+title = "Test: Second"
+
+[provide]
+kind = "dump"
+settings = "test-launcher/settings.json"
+game-dir-key = "game_dir"
+game-key = "start"
+set = { check_updates = false }
+"#;
+
+#[test]
+fn offers_each_game_of_a_port_whose_dump_is_there() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = common::ps4_dump(tmp.path(), "CUSA02320", &["eboot.bin", "u1data"]);
+    let dumps = dump::dumps(&[tmp.path().to_path_buf()]).unwrap();
+    let manifest = Manifest::parse(COLLECTION).unwrap();
+
+    let ports = port::entries(&[manifest], &Library::default(), &dumps, &heimspiel());
+
+    let titles: Vec<_> = ports.iter().map(|p| p.title.as_str()).collect();
+    assert_eq!(titles, ["Test: First", "Test: Second"]);
+    assert_eq!(ports[0].id, "testcollection/u1");
+    assert_eq!(
+        ports[0].exec().unwrap(),
+        format!(
+            "/usr/bin/heimspiel launch testcollection --dump {} --game u1",
+            path.display()
+        )
+    );
+}
+
+#[test]
+fn needs_a_complete_dump_of_an_accepted_title() {
+    let tmp = tempfile::tempdir().unwrap();
+    common::ps4_dump(tmp.path(), "CUSA02343", &["eboot.bin"]);
+    common::ps4_dump(tmp.path(), "CUSA01623", &["eboot.bin", "u1data"]);
+    let dumps = dump::dumps(&[tmp.path().to_path_buf()]).unwrap();
+    let manifest = Manifest::parse(COLLECTION).unwrap();
+
+    assert!(port::entries(&[manifest], &Library::default(), &dumps, &heimspiel()).is_empty());
 }

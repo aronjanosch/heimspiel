@@ -3,9 +3,11 @@
 //!
 //! Quiver 3.5.1 quirks, see docs/research/2026-10-23-tests.md (test 1): `--download` installs but
 //! never exits, so completion is detected from `installed-build.txt`; two `apps.json` entries for
-//! the same repository get mixed up, so there is one entry per repository. For apps in Quiver's own
-//! catalog the CLI finds no download unless a version is pinned (`StartupVersionResolver.cs`
-//! skips GitHub and leaves the release unset), so heimspiel pins one.
+//! the same repository get mixed up, so there is one entry per repository. Choosing the download is
+//! buggy both ways: for some apps in Quiver's own catalog the CLI finds none unless a version is
+//! pinned (`StartupVersionResolver.cs` skips GitHub and leaves the release unset), for apps outside
+//! it none once a version is pinned (docs/research/2026-10-24-uncharted.md). heimspiel installs
+//! unpinned first and pins the latest version only when that fails.
 
 use std::fs;
 use std::os::unix::process::CommandExt;
@@ -28,6 +30,24 @@ const RELEASE_SHA256: &str = "a8cd5398b6dae924bcec09ece1781c03cbfd73298675476f26
 
 pub struct Quiver {
     dir: PathBuf,
+}
+
+/// What `ensure_entry` does with the app's `preferredVersion`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pin<'a> {
+    /// Keep what is pinned, if anything.
+    Keep,
+    /// Pin nothing.
+    Unpinned,
+    Version(&'a str),
+}
+
+/// How `install` ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Install {
+    Done,
+    /// Quiver exited without installing, mostly because it found no download.
+    Failed,
 }
 
 impl Quiver {
@@ -79,9 +99,8 @@ impl Quiver {
         Ok(true)
     }
 
-    /// Adds or updates the app's entry in `apps.json`, keeping every other entry. `version` pins
-    /// the release to install; `None` keeps the pinned one.
-    pub fn ensure_entry(&self, app: &QuiverApp, version: Option<&str>) -> anyhow::Result<()> {
+    /// Adds or updates the app's entry in `apps.json`, keeping every other entry.
+    pub fn ensure_entry(&self, app: &QuiverApp, pin: Pin) -> anyhow::Result<()> {
         let path = self.dir.join("apps.json");
         let mut doc: Value = match fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text)
@@ -94,9 +113,10 @@ impl Quiver {
         let existing = apps
             .iter()
             .position(|a| a["repository"] == app.repository.as_str());
-        let pinned = match version {
-            Some(version) => Some(Value::from(version)),
-            None => existing.and_then(|i| apps[i].get("preferredVersion").cloned()),
+        let pinned = match pin {
+            Pin::Version(version) => Some(Value::from(version)),
+            Pin::Unpinned => None,
+            Pin::Keep => existing.and_then(|i| apps[i].get("preferredVersion").cloned()),
         };
         let mut entry = json!({
             "name": app.name,
@@ -176,20 +196,16 @@ impl Quiver {
     }
 
     /// Runs `--download` until the build is installed, then stops Quiver.
-    pub fn install(&self, app: &QuiverApp, timeout: Duration) -> anyhow::Result<()> {
+    pub fn install(&self, app: &QuiverApp, timeout: Duration) -> anyhow::Result<Install> {
         let mut child = self.spawn(&["--download", &app.name])?;
         let started = Instant::now();
         loop {
             if self.is_installed(app) {
                 stop(&mut child);
-                return Ok(());
+                return Ok(Install::Done);
             }
             if child.try_wait()?.is_some() {
-                bail!(
-                    "Quiver ended without installing {}; see {}",
-                    app.name,
-                    self.log().display()
-                );
+                return Ok(Install::Failed);
             }
             if started.elapsed() > timeout {
                 stop(&mut child);
@@ -216,7 +232,7 @@ impl Quiver {
         Ok(())
     }
 
-    fn log(&self) -> PathBuf {
+    pub fn log(&self) -> PathBuf {
         self.dir.join("heimspiel-quiver.log")
     }
 

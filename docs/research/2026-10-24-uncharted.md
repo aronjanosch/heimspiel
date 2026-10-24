@@ -67,6 +67,23 @@ From the Quiver 3.5.1 source (`~/.cache/heimspiel-tests/dl/quiver-src`):
   files (`proton`, `setup_prefix` and `copy_pfx`). heimspiel can therefore write `settings.json` into
   `pfx/drive_c/users/steamuser/AppData/Roaming/` before the first start.
 
+**`preferredVersion` breaks the download of apps outside the catalog.** The first launch from ES-DE ended
+with "No eligible download was found." Reproduced with `--download` on a fresh Quiver folder and a single
+`apps.json` entry for `Supermedo/uncharted_pc`:
+
+| `preferredVersion` | `linuxRunner` | Result |
+|---|---|---|
+| `v0.3.8` | proton | No eligible download |
+| `0.3.8` | proton | No eligible download |
+| `v0.3.8` | (none) | No eligible download |
+| (none) | proton | `Selected: uncharted-windows.zip`, installs |
+
+`Cache/version_cache.json` holds release `v0.3.8` with the asset in every case, so the release is fetched; it
+is lost later on the CLI path. The message is the CLI's fallback when no download choices exist
+(`CLIHandler.cs:626-628`). Windows assets are eligible on Linux
+(`DownloadAssetSelection.cs`, `Select`). Root cause not pinned down; for Ship of Harkinian (in the catalog)
+the pin is what makes the download work.
+
 ## Design conclusions
 
 - Manifest kind `dump`: heimspiel reads `param.sfo`, checks title ID and the files the Port needs, writes

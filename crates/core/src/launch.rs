@@ -4,13 +4,13 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 use crate::dump;
 use crate::fetch::Fetch;
 use crate::port::{Manifest, QuiverApp};
 use crate::provision::{self, Homes};
-use crate::quiver::Quiver;
+use crate::quiver::{Install, Pin, Quiver};
 
 pub struct PortLaunch<'a> {
     pub manifests: &'a [Manifest],
@@ -53,12 +53,21 @@ pub fn run(
     }
     let app = &manifest.quiver;
     if ctx.quiver.is_installed(app) {
-        ctx.quiver.ensure_entry(app, None)?;
+        ctx.quiver.ensure_entry(app, Pin::Keep)?;
     } else {
         (ctx.notify)(&format!("Installing {} …", manifest.title));
-        let version = (ctx.latest_version)(app)?;
-        ctx.quiver.ensure_entry(app, Some(&version))?;
-        ctx.quiver.install(app, ctx.install_timeout)?;
+        ctx.quiver.ensure_entry(app, Pin::Unpinned)?;
+        if ctx.quiver.install(app, ctx.install_timeout)? == Install::Failed {
+            let version = (ctx.latest_version)(app)?;
+            ctx.quiver.ensure_entry(app, Pin::Version(&version))?;
+            if ctx.quiver.install(app, ctx.install_timeout)? == Install::Failed {
+                bail!(
+                    "Quiver could not install {}; see {}",
+                    app.name,
+                    ctx.quiver.log().display()
+                );
+            }
+        }
     }
     ctx.quiver.select_executable(app)?;
     match original {

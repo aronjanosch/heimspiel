@@ -55,14 +55,28 @@ fn romm() -> FakeServer {
     })
 }
 
+/// When the fake Quiver's `--download` installs.
+#[derive(Clone, Copy)]
+enum Installs {
+    Always,
+    /// Like apps in Quiver's own catalog: only with a pinned version, otherwise it finds no
+    /// download and exits.
+    OnlyPinned,
+    /// Hangs without installing.
+    Never,
+}
+
 /// A stand-in for the Quiver AppImage: logs its arguments; `--download` installs and then hangs
-/// like Quiver 3.5.1 does, unless `installs` is false.
-fn fake_quiver(dir: &Path, installs: bool) {
-    let install = if installs {
-        // Copies a stand-in for the Port's program or release, if the test provides one.
-        r#"mkdir -p "$here/Apps/$2" && { [ ! -f "$here/port.sh" ] || cp "$here/port.sh" "$here/Apps/$2/port.appimage"; } && { [ ! -d "$here/release" ] || cp -r "$here/release/." "$here/Apps/$2/"; } && echo build > "$here/Apps/$2/installed-build.txt""#
-    } else {
-        ":"
+/// like Quiver 3.5.1 does.
+fn fake_quiver(dir: &Path, installs: Installs) {
+    // Copies a stand-in for the Port's program or release, if the test provides one.
+    let install = r#"mkdir -p "$here/Apps/$2" && { [ ! -f "$here/port.sh" ] || cp "$here/port.sh" "$here/Apps/$2/port.appimage"; } && { [ ! -d "$here/release" ] || cp -r "$here/release/." "$here/Apps/$2/"; } && echo build > "$here/Apps/$2/installed-build.txt""#;
+    let install = match installs {
+        Installs::Always => install.to_owned(),
+        Installs::OnlyPinned => format!(
+            r#"grep -q preferredVersion "$here/apps.json" || {{ echo "No eligible download was found."; exit 1; }}; {install}"#
+        ),
+        Installs::Never => ":".to_owned(),
     };
     let script = format!(
         "#!/bin/sh\nhere=$(dirname \"$0\")\necho \"$@\" >> \"$here/calls.log\"\n\
@@ -80,7 +94,7 @@ struct Setup {
     config_home: PathBuf,
 }
 
-fn setup(installs: bool) -> Setup {
+fn setup(installs: Installs) -> Setup {
     let tmp = tempfile::tempdir().unwrap();
     let quiver_dir = tmp.path().join("quiver");
     fake_quiver(&quiver_dir, installs);
@@ -155,7 +169,7 @@ fn calls(s: &Setup) -> Vec<String> {
 
 #[test]
 fn installs_provides_and_runs_a_port_on_its_first_start() {
-    let s = setup(true);
+    let s = setup(Installs::Always);
     let server = romm();
     let started = Instant::now();
 
@@ -171,13 +185,32 @@ fn installs_provides_and_runs_a_port_on_its_first_start() {
         apps.contains(r#""repository": "test/TestRecomp""#),
         "{apps}"
     );
-    // Quiver only picks a download for catalog apps once a version is pinned.
+    // Quiver finds no download for apps outside its catalog once a version is pinned.
+    assert!(!apps.contains("preferredVersion"), "{apps}");
+}
+
+#[test]
+fn pins_the_latest_version_when_quiver_finds_no_download_without() {
+    let s = setup(Installs::OnlyPinned);
+    let server = romm();
+
+    run(&s, &server, Duration::from_secs(20)).unwrap();
+
+    assert_eq!(
+        calls(&s),
+        [
+            "--download TestRecomp",
+            "--download TestRecomp",
+            "--run TestRecomp"
+        ]
+    );
+    let apps = fs::read_to_string(s.quiver_dir.join("apps.json")).unwrap();
     assert!(apps.contains(r#""preferredVersion": "1.0""#), "{apps}");
 }
 
 #[test]
 fn starts_right_away_the_second_time() {
-    let s = setup(true);
+    let s = setup(Installs::Always);
     let server = romm();
     run(&s, &server, Duration::from_secs(20)).unwrap();
     let requests = server.requests().len();
@@ -197,7 +230,7 @@ fn starts_right_away_the_second_time() {
 
 #[test]
 fn gives_up_on_an_install_that_never_finishes() {
-    let s = setup(false);
+    let s = setup(Installs::Never);
     let server = romm();
 
     let err = run(&s, &server, Duration::from_millis(500)).unwrap_err();
@@ -208,7 +241,7 @@ fn gives_up_on_an_install_that_never_finishes() {
 
 #[test]
 fn keeps_the_other_apps_in_quivers_library() {
-    let s = setup(true);
+    let s = setup(Installs::Always);
     fs::write(
         s.quiver_dir.join("apps.json"),
         r#"{"apps": [{"name": "Mine", "repository": "me/Mine", "folderName": "Mine", "releaseAssetFilter": "x.zip"}]}"#,
@@ -229,7 +262,7 @@ fn keeps_the_other_apps_in_quivers_library() {
 #[test]
 fn extracts_an_o2r_original_with_the_program_quiver_installed() {
     use sha1::{Digest, Sha1};
-    let s = setup(true);
+    let s = setup(Installs::Always);
     let archive = s.tmp.path().join("data/test/test.o2r");
     // Like SoH: extracts the ROM it is given, then waits at "Run?".
     let port = s.quiver_dir.join("port.sh");
@@ -300,7 +333,7 @@ game-key = "start"
 
 #[test]
 fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
-    let s = setup(true);
+    let s = setup(Installs::Always);
     fs::create_dir_all(s.quiver_dir.join("release")).unwrap();
     fs::write(s.quiver_dir.join("release/Play.exe"), b"MZ").unwrap();
     fs::write(s.quiver_dir.join("release/Launcher.exe"), b"MZ").unwrap();
@@ -342,7 +375,7 @@ fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
 
 #[test]
 fn refuses_a_dump_the_port_does_not_accept() {
-    let s = setup(true);
+    let s = setup(Installs::Always);
     let dump = common::ps4_dump(s.tmp.path(), "CUSA02320", &[]);
     let server = romm();
 

@@ -79,8 +79,8 @@ fn main() -> anyhow::Result<()> {
         Command::Sync => {
             let report = sync::sync(&config, &env)?;
             println!(
-                "Synced {} Steam, {} Heroic, {} manual and {} RomM games into ES-DE.",
-                report.steam, report.heroic, report.manual, report.romm
+                "Synced {} Steam, {} Heroic, {} manual, {} RomM and {} local games into ES-DE.",
+                report.steam, report.heroic, report.manual, report.romm, report.local
             );
             for note in report.notes {
                 println!("{note}");

@@ -35,7 +35,8 @@ pub fn entries(
     Ok(entries)
 }
 
-fn is_game(file_name: &str) -> bool {
+/// Whether a file in a game folder is a game rather than a save, screenshot or note.
+pub(crate) fn is_game(file_name: &str) -> bool {
     let ext = file_name
         .rsplit_once('.')
         .map(|(_, e)| e.to_lowercase())

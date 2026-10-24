@@ -10,7 +10,7 @@ use crate::config::{Config, expand};
 use crate::library::{Library, SourceKind};
 use crate::output::esde::EsDe;
 use crate::romm::Romm;
-use crate::source::{heroic, manual, romm, steam};
+use crate::source::{heroic, local, manual, romm, steam};
 
 /// heimspiel's own places on this machine.
 pub struct Env {
@@ -37,6 +37,7 @@ pub struct Report {
     pub heroic: usize,
     pub manual: usize,
     pub romm: usize,
+    pub local: usize,
     /// Sources that were skipped, and why.
     pub notes: Vec<String>,
 }
@@ -56,7 +57,7 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
         );
     }
     // ES-DE reads its gamelists at startup and writes them back on exit.
-    if es_de_running() {
+    if es_de_running(&es_de_home, user_home) {
         bail!("ES-DE is running; close it before syncing");
     }
 
@@ -111,15 +112,27 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
         )?);
     }
 
+    let local_folders: Vec<PathBuf> = config
+        .local
+        .folders
+        .iter()
+        .map(|f| expand(f, user_home))
+        .collect();
+    library.entries.extend(local::entries(&local_folders)?);
+
     for entry in &library.entries {
         match entry.source {
             SourceKind::Steam => report.steam += 1,
             SourceKind::Heroic => report.heroic += 1,
             SourceKind::Manual => report.manual += 1,
             SourceKind::RomM => report.romm += 1,
+            SourceKind::Local => report.local += 1,
         }
     }
-    let esde = EsDe::locate(&es_de_home, user_home)?.game_cache(&env.game_cache());
+    let esde = local_folders.iter().fold(
+        EsDe::locate(&es_de_home, user_home)?.game_cache(&env.game_cache()),
+        |esde, f| esde.local_folder(f),
+    );
     esde.write(&library).context("writing to ES-DE")?;
     if config.romm.is_some() && esde.install_hook(&env.heimspiel)? {
         report.notes.push(
@@ -205,12 +218,27 @@ fn heroic_command(config: &Config, heroic_config: &Path, user_home: &Path) -> Op
     Some(vec![appimage.to_string_lossy().into_owned()])
 }
 
-/// ES-DE's binary is called `es-de`, also inside the AppImage.
-fn es_de_running() -> bool {
+/// Whether an ES-DE with this application data folder runs. ES-DE's binary is called `es-de`, also
+/// inside the AppImage; `--home <dir>` makes it use `<dir>/ES-DE` instead of `~/ES-DE`.
+fn es_de_running(es_de_home: &Path, user_home: &Path) -> bool {
     let Ok(procs) = fs::read_dir("/proc") else {
         return false;
     };
-    procs
-        .filter_map(Result::ok)
-        .any(|p| fs::read_to_string(p.path().join("comm")).is_ok_and(|c| c.trim() == "es-de"))
+    procs.filter_map(Result::ok).any(|p| {
+        if !fs::read_to_string(p.path().join("comm")).is_ok_and(|c| c.trim() == "es-de") {
+            return false;
+        }
+        let cmdline = fs::read(p.path().join("cmdline")).unwrap_or_default();
+        let args: Vec<&[u8]> = cmdline.split(|b| *b == 0).collect();
+        let home = args
+            .windows(2)
+            .find(|w| w[0] == b"--home")
+            .map(|w| PathBuf::from(String::from_utf8_lossy(w[1]).into_owned()))
+            .unwrap_or_else(|| user_home.to_path_buf());
+        same_dir(&home.join("ES-DE"), es_de_home)
+    })
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }

@@ -51,6 +51,8 @@ pub enum Launch {
 pub enum FileLocation {
     /// On a RomM server, fetched when the game is started.
     RomM { rom_id: u64 },
+    /// In a local folder.
+    Local { path: PathBuf },
 }
 
 /// Descriptive data for frontends; every field is optional.
@@ -73,4 +75,5 @@ pub enum SourceKind {
     Heroic,
     Manual,
     RomM,
+    Local,
 }

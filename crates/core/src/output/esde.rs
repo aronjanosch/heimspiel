@@ -18,6 +18,8 @@ pub struct EsDe {
     media: PathBuf,
     /// Where the `game-start` hook keeps fetched games; links into it replace Placeholders.
     game_cache: Option<PathBuf>,
+    /// Local folders whose games are linked into the ROM folders.
+    local_folders: Vec<PathBuf>,
 }
 
 impl EsDe {
@@ -37,6 +39,7 @@ impl EsDe {
             roms,
             media,
             game_cache: None,
+            local_folders: Vec::new(),
         })
     }
 
@@ -45,6 +48,21 @@ impl EsDe {
     pub fn game_cache(mut self, dir: &Path) -> EsDe {
         self.game_cache = Some(dir.to_path_buf());
         self
+    }
+
+    /// Adds a local folder, so links to its games count as heimspiel's own.
+    pub fn local_folder(mut self, dir: &Path) -> EsDe {
+        self.local_folders.push(dir.to_path_buf());
+        self
+    }
+
+    /// Folders that heimspiel's links point into.
+    fn link_roots(&self) -> Vec<&Path> {
+        self.game_cache
+            .iter()
+            .chain(&self.local_folders)
+            .map(PathBuf::as_path)
+            .collect()
     }
 
     /// Puts heimspiel's `game-start` script in place and turns on ES-DE's event scripts.
@@ -113,7 +131,7 @@ impl EsDe {
             return Ok(());
         }
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        let own = own_files(&dir, self.game_cache.as_deref())?;
+        let own = own_files(&dir, &self.link_roots())?;
         let foreign = |file: &str| dir.join(file).exists() && !own.iter().any(|o| o == file);
         entries.sort_by(|a, b| a.id.cmp(&b.id));
         let mut added: Vec<(String, &Entry)> = Vec::new();
@@ -122,7 +140,7 @@ impl EsDe {
                 Launch::Command { .. } => (
                     file_stem(&entry.title),
                     ".desktop".to_owned(),
-                    desktop_file(entry),
+                    Content::File(desktop_file(entry)),
                 ),
                 Launch::File {
                     file_name,
@@ -134,7 +152,13 @@ impl EsDe {
                         Some(dot) if dot > 0 => (name[..dot].to_owned(), name[dot..].to_owned()),
                         _ => (name, String::new()),
                     };
-                    (stem, ext, placeholder(location))
+                    let content = match location {
+                        FileLocation::RomM { rom_id } => {
+                            Content::File(format!("{PLACEHOLDER}romm:{rom_id}\n"))
+                        }
+                        FileLocation::Local { path } => Content::Link(path),
+                    };
+                    (stem, ext, content)
                 }
             };
             // Most likely the same game, placed by the user or ES-DE's Game Importer.
@@ -148,9 +172,20 @@ impl EsDe {
                 })
                 .find(|f| !foreign(f) && !added.iter().any(|(a, _)| a == f))
                 .unwrap();
-            // A fetched game stays linked; the hook made that link from this Placeholder.
-            if !is_link_into(&dir.join(&file), self.game_cache.as_deref()) {
-                write_if_changed(&dir.join(&file), content.as_bytes())?;
+            let path = dir.join(&file);
+            match content {
+                // A fetched game stays linked; the hook made that link from this Placeholder.
+                Content::File(_)
+                    if is_link_into(
+                        &path,
+                        &self
+                            .game_cache
+                            .iter()
+                            .map(PathBuf::as_path)
+                            .collect::<Vec<_>>(),
+                    ) => {}
+                Content::File(text) => write_if_changed(&path, text.as_bytes())?,
+                Content::Link(target) => link(&path, target)?,
             }
             if let Some(cover) = &entry.cover {
                 self.place_cover(system, &file, cover)?;
@@ -317,6 +352,7 @@ fn desktop_file(entry: &Entry) -> String {
         SourceKind::Heroic => "heroic",
         SourceKind::Manual => "manual",
         SourceKind::RomM => "romm",
+        SourceKind::Local => "local",
     };
     let Launch::Command { exec, working_dir } = &entry.launch else {
         unreachable!("only Command Entries become .desktop files");
@@ -331,19 +367,32 @@ fn desktop_file(entry: &Entry) -> String {
     text
 }
 
-fn placeholder(location: &FileLocation) -> String {
-    let FileLocation::RomM { rom_id } = location;
-    format!("{PLACEHOLDER}romm:{rom_id}\n")
+/// What an Entry becomes in a ROM folder.
+enum Content<'a> {
+    File(String),
+    Link(&'a Path),
+}
+
+/// Points `path` at `target`, replacing what heimspiel had there before.
+fn link(path: &Path, target: &Path) -> anyhow::Result<()> {
+    if fs::read_link(path).is_ok_and(|t| t == target) {
+        return Ok(());
+    }
+    let tmp = path.with_extension("heimspiel-link");
+    let _ = fs::remove_file(&tmp);
+    std::os::unix::fs::symlink(target, &tmp)
+        .with_context(|| format!("linking {}", path.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
 /// Names of the files in `dir` that heimspiel wrote: marked `.desktop` files and Placeholders.
 /// Only small files are opened, so real game files are never read.
-fn own_files(dir: &Path, game_cache: Option<&Path>) -> anyhow::Result<Vec<String>> {
+fn own_files(dir: &Path, link_roots: &[&Path]) -> anyhow::Result<Vec<String>> {
     let mut files = Vec::new();
     for item in fs::read_dir(dir)? {
         let item = item?;
         let meta = item.metadata()?;
-        if meta.is_symlink() && is_link_into(&item.path(), game_cache) {
+        if meta.is_symlink() && is_link_into(&item.path(), link_roots) {
             files.push(item.file_name().to_string_lossy().into_owned());
             continue;
         }
@@ -430,9 +479,9 @@ fn text_element(name: &str, text: &str) -> Element {
     element
 }
 
-/// Whether `path` is a link into `dir`, dangling or not.
-fn is_link_into(path: &Path, dir: Option<&Path>) -> bool {
-    dir.is_some_and(|dir| fs::read_link(path).is_ok_and(|target| target.starts_with(dir)))
+/// Whether `path` is a link into one of `dirs`, dangling or not.
+fn is_link_into(path: &Path, dirs: &[&Path]) -> bool {
+    fs::read_link(path).is_ok_and(|target| dirs.iter().any(|dir| target.starts_with(dir)))
 }
 
 /// Quotes an argument for `/bin/sh`.

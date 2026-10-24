@@ -15,6 +15,14 @@ pub struct Config {
     pub heroic: HeroicConfig,
     pub manual: ManualConfig,
     pub romm: Option<RommConfig>,
+    pub local: LocalConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LocalConfig {
+    /// Folders with one subfolder per platform, named by RomM's slugs: `<folder>/n64/…`.
+    pub folders: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]

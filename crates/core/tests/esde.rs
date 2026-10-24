@@ -345,3 +345,41 @@ fn installs_the_game_start_hook_and_turns_on_event_scripts() {
     assert!(settings.contains("<bool name=\"CustomEventScripts\" value=\"true\" />"));
     assert!(settings.contains("<bool name=\"ShowHiddenGames\" value=\"true\" />"));
 }
+
+#[test]
+fn links_local_games_and_removes_only_the_link() {
+    let s = setup();
+    let folder = s.home.parent().unwrap().join("Archive");
+    let file = folder.join("n64/Super Mario 64 (USA).z64");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, b"rom").unwrap();
+    let esde = EsDe::locate(&s.home, s.home.parent().unwrap())
+        .unwrap()
+        .local_folder(&folder);
+    let mario = Entry {
+        source: SourceKind::Local,
+        id: file.display().to_string(),
+        title: "Super Mario 64".into(),
+        launch: Launch::File {
+            platform: "n64".into(),
+            file_name: "Super Mario 64 (USA).z64".into(),
+            location: FileLocation::Local { path: file.clone() },
+        },
+        cover: None,
+        metadata: Metadata::default(),
+    };
+
+    esde.write(&library(vec![mario.clone()])).unwrap();
+    esde.write(&library(vec![mario])).unwrap();
+
+    let link = s.roms.join("n64/Super Mario 64 (USA).z64");
+    assert_eq!(fs::read_link(&link).unwrap(), file);
+    assert!(
+        read(s.home.join("gamelists/n64/gamelist.xml")).contains("<name>Super Mario 64</name>")
+    );
+
+    esde.write(&library(vec![])).unwrap();
+
+    assert!(fs::symlink_metadata(&link).is_err());
+    assert_eq!(fs::read(&file).unwrap(), b"rom");
+}

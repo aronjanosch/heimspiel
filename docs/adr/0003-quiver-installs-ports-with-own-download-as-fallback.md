@@ -13,9 +13,8 @@ the game exits.
 - Quiver cannot install every repository from its CLI (SpartanPort: "No eligible download"). For those
   heimspiel downloads the release asset itself with the same asset filter.
 - heimspiel runs Quiver in its own folder, because Quiver keeps its library next to its AppImage.
-- For apps in Quiver's own catalog the CLI takes the version from quiverlauncher.com, skips GitHub and
-  then finds no download (`StartupVersionResolver.cs`; this was the SpartanPort failure). For an app
-  outside the catalog it is the other way round: with a `preferredVersion` the CLI finds no download
-  (Uncharted, docs/research/2026-10-24-uncharted.md). heimspiel therefore installs unpinned first and
-  pins the newest GitHub release only when Quiver exits without installing. Quiver's auto update stays
-  off; updating Ports is heimspiel's job.
+- For apps in Quiver's own catalog the CLI installs only a version quiverlauncher.com lists; unpinned or
+  pinned to another version it finds no download (`CatalogReleases.cs`; this was the SpartanPort and the
+  first Uncharted failure, docs/research/2026-10-24-uncharted.md). heimspiel pins the catalog's verified
+  version for those and the newest GitHub release for the rest, so a catalog app may get an older release
+  than GitHub's newest. Quiver's auto update stays off; updating Ports is heimspiel's job.

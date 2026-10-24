@@ -56,16 +56,23 @@ pub fn run(
         ctx.quiver.ensure_entry(app, Pin::Keep)?;
     } else {
         (ctx.notify)(&format!("Installing {} …", manifest.title));
-        ctx.quiver.ensure_entry(app, Pin::Unpinned)?;
-        if ctx.quiver.install(app, ctx.install_timeout)? == Install::Failed {
-            let version = (ctx.latest_version)(app)?;
+        let mut version = match ctx.quiver.catalog_version(app) {
+            Some(listed) => listed,
+            None => (ctx.latest_version)(app)?,
+        };
+        loop {
             ctx.quiver.ensure_entry(app, Pin::Version(&version))?;
-            if ctx.quiver.install(app, ctx.install_timeout)? == Install::Failed {
-                bail!(
-                    "Quiver could not install {}; see {}",
+            if ctx.quiver.install(app, ctx.install_timeout)? == Install::Done {
+                break;
+            }
+            // Quiver fetches its catalog on its first run; a catalog app needs the version listed there.
+            match ctx.quiver.catalog_version(app) {
+                Some(listed) if listed != version => version = listed,
+                _ => bail!(
+                    "Quiver could not install {} {version}; see {}",
                     app.name,
                     ctx.quiver.log().display()
-                );
+                ),
             }
         }
     }

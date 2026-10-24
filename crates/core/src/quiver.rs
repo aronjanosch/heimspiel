@@ -3,11 +3,10 @@
 //!
 //! Quiver 3.5.1 quirks, see docs/research/2026-10-23-tests.md (test 1): `--download` installs but
 //! never exits, so completion is detected from `installed-build.txt`; two `apps.json` entries for
-//! the same repository get mixed up, so there is one entry per repository. Choosing the download is
-//! buggy both ways: for some apps in Quiver's own catalog the CLI finds none unless a version is
-//! pinned (`StartupVersionResolver.cs` skips GitHub and leaves the release unset), for apps outside
-//! it none once a version is pinned (docs/research/2026-10-24-uncharted.md). heimspiel installs
-//! unpinned first and pins the latest version only when that fails.
+//! the same repository get mixed up, so there is one entry per repository. For an app in Quiver's
+//! own catalog the CLI installs only a version quiverlauncher.com lists, and finds no download
+//! unpinned or pinned to any other (docs/research/2026-10-24-uncharted.md); heimspiel pins the
+//! catalog's version for those and the newest GitHub release for the rest.
 
 use std::fs;
 use std::os::unix::process::CommandExt;
@@ -37,8 +36,6 @@ pub struct Quiver {
 pub enum Pin<'a> {
     /// Keep what is pinned, if anything.
     Keep,
-    /// Pin nothing.
-    Unpinned,
     Version(&'a str),
 }
 
@@ -115,7 +112,6 @@ impl Quiver {
             .position(|a| a["repository"] == app.repository.as_str());
         let pinned = match pin {
             Pin::Version(version) => Some(Value::from(version)),
-            Pin::Unpinned => None,
             Pin::Keep => existing.and_then(|i| apps[i].get("preferredVersion").cloned()),
         };
         let mut entry = json!({
@@ -161,6 +157,20 @@ impl Quiver {
         });
         let program = programs.next()?;
         programs.next().is_none().then_some(program)
+    }
+
+    /// The version Quiver's catalog verified for the app, from the copy Quiver caches on its first
+    /// run; `None` for apps outside the catalog or before that run.
+    pub fn catalog_version(&self, app: &QuiverApp) -> Option<String> {
+        let text = fs::read_to_string(self.dir.join("Cache/catalog-release-status.json")).ok()?;
+        let apps: Vec<Value> = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+        apps.iter().find(|a| {
+            a["repository"]
+                .as_str()
+                .is_some_and(|r| r.eq_ignore_ascii_case(&app.repository))
+        })?["verified"]["version"]
+            .as_str()
+            .map(str::to_owned)
     }
 
     /// The Proton prefix (Proton's compat data folder) of a Windows Port.

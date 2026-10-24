@@ -59,9 +59,9 @@ fn romm() -> FakeServer {
 #[derive(Clone, Copy)]
 enum Installs {
     Always,
-    /// Like apps in Quiver's own catalog: only with a pinned version, otherwise it finds no
-    /// download and exits.
-    OnlyPinned,
+    /// Like apps in Quiver's own catalog: only the version the catalog lists, `0.9`; for any other
+    /// it finds no download and exits. The catalog lands in Quiver's cache on its first run.
+    CatalogVersion,
     /// Hangs without installing.
     Never,
 }
@@ -73,8 +73,8 @@ fn fake_quiver(dir: &Path, installs: Installs) {
     let install = r#"mkdir -p "$here/Apps/$2" && { [ ! -f "$here/port.sh" ] || cp "$here/port.sh" "$here/Apps/$2/port.appimage"; } && { [ ! -d "$here/release" ] || cp -r "$here/release/." "$here/Apps/$2/"; } && echo build > "$here/Apps/$2/installed-build.txt""#;
     let install = match installs {
         Installs::Always => install.to_owned(),
-        Installs::OnlyPinned => format!(
-            r#"grep -q preferredVersion "$here/apps.json" || {{ echo "No eligible download was found."; exit 1; }}; {install}"#
+        Installs::CatalogVersion => format!(
+            r#"mkdir -p "$here/Cache" && echo '[{{"repository": "test/TestRecomp", "verified": {{"version": "0.9"}}}}]' > "$here/Cache/catalog-release-status.json"; grep -q '"preferredVersion": "0.9"' "$here/apps.json" || {{ echo "No eligible download was found."; exit 1; }}; {install}"#
         ),
         Installs::Never => ":".to_owned(),
     };
@@ -185,13 +185,13 @@ fn installs_provides_and_runs_a_port_on_its_first_start() {
         apps.contains(r#""repository": "test/TestRecomp""#),
         "{apps}"
     );
-    // Quiver finds no download for apps outside its catalog once a version is pinned.
-    assert!(!apps.contains("preferredVersion"), "{apps}");
+    // heimspiel, not Quiver, decides when a Port is updated.
+    assert!(apps.contains(r#""preferredVersion": "1.0""#), "{apps}");
 }
 
 #[test]
-fn pins_the_latest_version_when_quiver_finds_no_download_without() {
-    let s = setup(Installs::OnlyPinned);
+fn pins_the_version_quivers_catalog_lists() {
+    let s = setup(Installs::CatalogVersion);
     let server = romm();
 
     run(&s, &server, Duration::from_secs(20)).unwrap();
@@ -205,7 +205,18 @@ fn pins_the_latest_version_when_quiver_finds_no_download_without() {
         ]
     );
     let apps = fs::read_to_string(s.quiver_dir.join("apps.json")).unwrap();
-    assert!(apps.contains(r#""preferredVersion": "1.0""#), "{apps}");
+    assert!(apps.contains(r#""preferredVersion": "0.9""#), "{apps}");
+
+    // Once the catalog is known, the first try already pins its version.
+    let again = setup(Installs::CatalogVersion);
+    fs::create_dir_all(again.quiver_dir.join("Cache")).unwrap();
+    fs::copy(
+        s.quiver_dir.join("Cache/catalog-release-status.json"),
+        again.quiver_dir.join("Cache/catalog-release-status.json"),
+    )
+    .unwrap();
+    run(&again, &server, Duration::from_secs(20)).unwrap();
+    assert_eq!(calls(&again), ["--download TestRecomp", "--run TestRecomp"]);
 }
 
 #[test]

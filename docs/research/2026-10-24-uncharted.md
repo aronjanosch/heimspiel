@@ -67,28 +67,34 @@ From the Quiver 3.5.1 source (`~/.cache/heimspiel-tests/dl/quiver-src`):
   files (`proton`, `setup_prefix` and `copy_pfx`). heimspiel can therefore write `settings.json` into
   `pfx/drive_c/users/steamuser/AppData/Roaming/` before the first start.
 
-**`preferredVersion` breaks the download of apps outside the catalog.** The first launch from ES-DE ended
-with "No eligible download was found." Reproduced with `--download` on a fresh Quiver folder and a single
-`apps.json` entry for `Supermedo/uncharted_pc`:
+**Catalog apps install only the version the catalog lists.** The first launch from ES-DE ended with "No
+eligible download was found." `Supermedo/uncharted_pc` is in Quiver's catalog (slug
+`uncharted-the-nathan-drake-collection-uncharted-pc`, verified `v0.3.6`), which Quiver caches in
+`Cache/catalog-release-status.json` and `Cache/catalog-release-links.json` on its first run. For a catalog app
+the release comes from quiverlauncher.com, and a pin the site does not list selects nothing
+(`Services/CatalogReleases.cs:212-219`). `--download` with one `apps.json` entry:
 
-| `preferredVersion` | `linuxRunner` | Result |
+| Quiver folder | `preferredVersion` | Result |
 |---|---|---|
-| `v0.3.8` | proton | No eligible download |
-| `0.3.8` | proton | No eligible download |
-| `v0.3.8` | (none) | No eligible download |
-| (none) | proton | `Selected: uncharted-windows.zip`, installs |
+| fresh (no catalog cache yet) | none | `Selected: uncharted-windows.zip` |
+| fresh | `v0.3.8`, `0.3.8` | No eligible download |
+| with catalog cache | none | No eligible download |
+| with catalog cache, catalog files removed | none | `Selected: uncharted-windows.zip` |
+| with catalog cache | `v0.3.6` (verified) | `Selected: uncharted-windows.zip` |
+| with catalog cache | `v0.3.7` | No eligible download |
 
-`Cache/version_cache.json` holds release `v0.3.8` with the asset in every case, so the release is fetched; it
-is lost later on the CLI path. The message is the CLI's fallback when no download choices exist
-(`CLIHandler.cs:626-628`). Windows assets are eligible on Linux
-(`DownloadAssetSelection.cs`, `Select`). Root cause not pinned down; for Ship of Harkinian (in the catalog)
-the pin is what makes the download work.
+The message is the CLI's fallback when no release was selected (`CLIHandler.cs:626-628`). Windows assets are
+eligible on Linux (`DownloadAssetSelection.cs`, `Select`). Ship of Harkinian worked pinned to 9.3.1 because
+that is its verified catalog version; the SpartanPort failure of test 6 fits the same rule. Why the unpinned
+catalog case fails was not pinned down.
 
 ## Design conclusions
 
 - Manifest kind `dump`: heimspiel reads `param.sfo`, checks title ID and the files the Port needs, writes
   `game_dir`, `start` and `check_updates = false` into the launcher's `settings.json` in the Port's prefix,
   keeping the user's other settings, and runs `Play Uncharted.exe` through Quiver.
+- heimspiel pins the version Quiver's catalog verified, the newest GitHub release only for apps outside the
+  catalog, and retries with the catalog's version once Quiver has fetched the catalog.
 - One ES-DE entry per game (U1, U2, U3); the entry passes the game as `--game`.
 - heimspiel sets `linuxRunner` and `linuxPrefixPath` itself, so it knows where the prefix is.
 - Open: whether Quiver's launch (without `PROTON_USE_XALIA=0`, with Quiver's own `SteamGameId`) also shows

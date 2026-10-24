@@ -2,8 +2,10 @@
 //!
 //! Terms follow `GLOSSARY.md` at the repository root. The CLI and the app only call into this crate.
 
+pub mod cache;
 pub mod config;
 pub mod desktop;
+pub mod hook;
 pub mod library;
 pub mod output;
 pub mod romm;

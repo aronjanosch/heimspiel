@@ -15,6 +15,8 @@ use serde::Deserialize;
 use ureq::Agent;
 use ureq::http::Response;
 
+const API_BODY_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub struct Romm {
     base: String,
     token: String,
@@ -66,6 +68,17 @@ pub struct RomMetadata {
     pub average_rating: Option<f64>,
 }
 
+/// The fields of `/api/roms/{id}` needed to fetch a game.
+#[derive(Debug, Deserialize)]
+pub struct RomDetail {
+    pub id: u64,
+    pub fs_name: String,
+    pub name: String,
+    pub fs_size_bytes: u64,
+    #[serde(default)]
+    pub has_multiple_files: bool,
+}
+
 #[derive(Deserialize)]
 struct RomPage {
     items: Vec<Rom>,
@@ -74,9 +87,11 @@ struct RomPage {
 
 impl Romm {
     pub fn new(base_url: &str, token: &str) -> Romm {
+        // No overall timeout: a disc image may take many minutes. API answers get one per request.
         let agent = Agent::config_builder()
             .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(60)))
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_recv_response(Some(Duration::from_secs(60)))
             .build()
             .into();
         Romm {
@@ -130,6 +145,21 @@ impl Romm {
         }
     }
 
+    pub fn rom(&self, id: u64) -> anyhow::Result<RomDetail> {
+        self.get_json(&format!("/api/roms/{id}"))
+    }
+
+    /// Downloads a game file to `dest`.
+    pub fn download_rom(&self, id: u64, fs_name: &str, dest: &Path) -> anyhow::Result<()> {
+        let path = format!("/api/roms/{id}/content/{}", percent_encode(fs_name));
+        let mut response = self.get(&path, None)?;
+        let mut file =
+            fs::File::create(dest).with_context(|| format!("creating {}", dest.display()))?;
+        io::copy(&mut response.body_mut().as_reader(), &mut file)
+            .with_context(|| format!("downloading {fs_name}"))?;
+        Ok(())
+    }
+
     /// Downloads a media file (cover, screenshot) by its server path to `dest`.
     pub fn download_media(&self, path: &str, dest: &Path) -> anyhow::Result<()> {
         if let Some(last) = self.last_media.get() {
@@ -139,7 +169,7 @@ impl Romm {
         self.last_media.set(Some(Instant::now()));
         // The `?ts=` query only busts caches, and RomM puts unencoded spaces into it.
         let path = path.split('?').next().unwrap_or(path).replace(' ', "%20");
-        let mut response = self.get(&path)?;
+        let mut response = self.get(&path, Some(API_BODY_TIMEOUT))?;
         let tmp = dest.with_extension("part");
         let mut file =
             fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
@@ -150,7 +180,7 @@ impl Romm {
     }
 
     fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let mut response = self.get(path)?;
+        let mut response = self.get(path, Some(API_BODY_TIMEOUT))?;
         let text = response
             .body_mut()
             .with_config()
@@ -161,7 +191,12 @@ impl Romm {
     }
 
     /// GET with retries on transport errors, 429 and 5xx; other errors fail at once.
-    fn get(&self, path: &str) -> anyhow::Result<Response<ureq::Body>> {
+    /// `body_timeout` limits the time to read the whole answer.
+    fn get(
+        &self,
+        path: &str,
+        body_timeout: Option<Duration>,
+    ) -> anyhow::Result<Response<ureq::Body>> {
         let url = format!("{}{path}", self.base);
         let mut last_error = anyhow!("no request made");
         for attempt in 0..=self.retries {
@@ -172,6 +207,9 @@ impl Romm {
                 .agent
                 .get(&url)
                 .header("Authorization", format!("Bearer {}", self.token))
+                .config()
+                .timeout_recv_body(body_timeout)
+                .build()
                 .call()
             {
                 Ok(response) if response.status().is_success() => return Ok(response),
@@ -188,4 +226,16 @@ impl Romm {
         }
         Err(last_error)
     }
+}
+
+/// Encodes everything but RFC 3986's unreserved characters, for a file name in a URL path.
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            b => format!("%{b:02X}"),
+        })
+        .collect()
 }

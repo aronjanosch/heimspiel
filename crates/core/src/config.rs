@@ -59,6 +59,21 @@ pub struct RommConfig {
     pub token_file: Option<PathBuf>,
     /// RomM platform slugs to show in ES-DE, e.g. `["n64", "gba"]`.
     pub platforms: Vec<String>,
+    /// Size limit of the cache for fetched games; default 50 GiB.
+    pub cache_limit_gib: Option<u64>,
+}
+
+impl RommConfig {
+    pub fn token_file(&self, user_home: &Path, config_dir: &Path) -> PathBuf {
+        self.token_file
+            .as_deref()
+            .map(|f| expand(f, user_home))
+            .unwrap_or_else(|| config_dir.join("romm-token"))
+    }
+
+    pub fn cache_limit_bytes(&self) -> u64 {
+        self.cache_limit_gib.unwrap_or(50) << 30
+    }
 }
 
 impl Config {

@@ -16,6 +16,8 @@ pub struct EsDe {
     home: PathBuf,
     roms: PathBuf,
     media: PathBuf,
+    /// Where the `game-start` hook keeps fetched games; links into it replace Placeholders.
+    game_cache: Option<PathBuf>,
 }
 
 impl EsDe {
@@ -34,7 +36,52 @@ impl EsDe {
             home: home.to_path_buf(),
             roms,
             media,
+            game_cache: None,
         })
+    }
+
+    /// Tells the output where fetched games live, so it keeps links to them in place of
+    /// their Placeholders.
+    pub fn game_cache(mut self, dir: &Path) -> EsDe {
+        self.game_cache = Some(dir.to_path_buf());
+        self
+    }
+
+    /// Puts heimspiel's `game-start` script in place and turns on ES-DE's event scripts.
+    /// `command` starts heimspiel. Returns whether anything changed.
+    pub fn install_hook(&self, command: &[String]) -> anyhow::Result<bool> {
+        use std::os::unix::fs::PermissionsExt;
+        let script = self.home.join("scripts/game-start/heimspiel");
+        let command: Vec<String> = command.iter().map(|a| shell_quote(a)).collect();
+        let text = format!(
+            "#!/bin/sh\n# Written by heimspiel sync: fetches RomM games before they start.\n\
+             exec {} hook game-start \"$@\"\n",
+            command.join(" ")
+        );
+        let mut changed = fs::read_to_string(&script).ok().as_deref() != Some(text.as_str());
+        if changed {
+            fs::create_dir_all(script.parent().unwrap())?;
+            write_if_changed(&script, text.as_bytes())?;
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755))?;
+        }
+
+        let path = self.home.join("settings/es_settings.xml");
+        let settings = fs::read_to_string(&path).unwrap_or_default();
+        let on = r#"<bool name="CustomEventScripts" value="true" />"#;
+        if !settings.contains(on) {
+            let mut lines: Vec<&str> = settings
+                .lines()
+                .filter(|l| !l.contains(r#"name="CustomEventScripts""#))
+                .collect();
+            if lines.is_empty() {
+                lines.push(r#"<?xml version="1.0"?>"#);
+            }
+            lines.push(on);
+            fs::create_dir_all(path.parent().unwrap())?;
+            write_if_changed(&path, (lines.join("\n") + "\n").as_bytes())?;
+            changed = true;
+        }
+        Ok(changed)
     }
 
     /// Brings every system in line with `library`. Files and gamelist entries that heimspiel did
@@ -66,7 +113,7 @@ impl EsDe {
             return Ok(());
         }
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        let own = own_files(&dir)?;
+        let own = own_files(&dir, self.game_cache.as_deref())?;
         let foreign = |file: &str| dir.join(file).exists() && !own.iter().any(|o| o == file);
         entries.sort_by(|a, b| a.id.cmp(&b.id));
         let mut added: Vec<(String, &Entry)> = Vec::new();
@@ -101,7 +148,10 @@ impl EsDe {
                 })
                 .find(|f| !foreign(f) && !added.iter().any(|(a, _)| a == f))
                 .unwrap();
-            write_if_changed(&dir.join(&file), content.as_bytes())?;
+            // A fetched game stays linked; the hook made that link from this Placeholder.
+            if !is_link_into(&dir.join(&file), self.game_cache.as_deref()) {
+                write_if_changed(&dir.join(&file), content.as_bytes())?;
+            }
             if let Some(cover) = &entry.cover {
                 self.place_cover(system, &file, cover)?;
             }
@@ -288,11 +338,15 @@ fn placeholder(location: &FileLocation) -> String {
 
 /// Names of the files in `dir` that heimspiel wrote: marked `.desktop` files and Placeholders.
 /// Only small files are opened, so real game files are never read.
-fn own_files(dir: &Path) -> anyhow::Result<Vec<String>> {
+fn own_files(dir: &Path, game_cache: Option<&Path>) -> anyhow::Result<Vec<String>> {
     let mut files = Vec::new();
     for item in fs::read_dir(dir)? {
         let item = item?;
         let meta = item.metadata()?;
+        if meta.is_symlink() && is_link_into(&item.path(), game_cache) {
+            files.push(item.file_name().to_string_lossy().into_owned());
+            continue;
+        }
         if !meta.is_file() || meta.len() > 64 * 1024 {
             continue;
         }
@@ -374,6 +428,23 @@ fn text_element(name: &str, text: &str) -> Element {
     let mut element = Element::new(name);
     element.children.push(XMLNode::Text(text.to_owned()));
     element
+}
+
+/// Whether `path` is a link into `dir`, dangling or not.
+fn is_link_into(path: &Path, dir: Option<&Path>) -> bool {
+    dir.is_some_and(|dir| fs::read_link(path).is_ok_and(|target| target.starts_with(dir)))
+}
+
+/// Quotes an argument for `/bin/sh`.
+fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+=:".contains(c))
+    {
+        return arg.to_owned();
+    }
+    format!("'{}'", arg.replace('\'', r"'\''"))
 }
 
 /// Writes atomically, and only when the content differs, so unchanged files keep their mtime.

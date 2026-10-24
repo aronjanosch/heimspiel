@@ -300,3 +300,48 @@ fn removes_placeholders_of_games_gone_from_romm_but_never_a_real_game_file() {
         4096
     );
 }
+
+#[test]
+fn keeps_a_link_to_a_fetched_game_and_removes_it_with_the_game() {
+    let s = setup();
+    let cache = s.home.parent().unwrap().join("cache");
+    let esde = EsDe::locate(&s.home, s.home.parent().unwrap())
+        .unwrap()
+        .game_cache(&cache);
+    let lode = || library(vec![romm(3039, "n64", "Lode.n64", "Lode")]);
+    esde.write(&lode()).unwrap();
+    let game = s.roms.join("n64/Lode.n64");
+    let cached = cache.join("3039/Lode.n64");
+    fs::create_dir_all(cached.parent().unwrap()).unwrap();
+    fs::write(&cached, b"rom").unwrap();
+    fs::remove_file(&game).unwrap();
+    std::os::unix::fs::symlink(&cached, &game).unwrap();
+
+    esde.write(&lode()).unwrap();
+    assert_eq!(fs::read(&game).unwrap(), b"rom");
+
+    esde.write(&library(vec![])).unwrap();
+    assert!(fs::symlink_metadata(&game).is_err());
+}
+
+#[test]
+fn installs_the_game_start_hook_and_turns_on_event_scripts() {
+    let s = setup();
+    let command = vec!["/opt/heimspiel bin/heimspiel".to_owned()];
+
+    assert!(s.esde.install_hook(&command).unwrap());
+    assert!(!s.esde.install_hook(&command).unwrap());
+
+    let script = s.home.join("scripts/game-start/heimspiel");
+    let text = read(&script);
+    assert!(text.starts_with("#!/bin/sh\n"));
+    assert!(text.contains("exec '/opt/heimspiel bin/heimspiel' hook game-start \"$@\""));
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        fs::metadata(&script).unwrap().permissions().mode() & 0o111,
+        0o111
+    );
+    let settings = read(s.home.join("settings/es_settings.xml"));
+    assert!(settings.contains("<bool name=\"CustomEventScripts\" value=\"true\" />"));
+    assert!(settings.contains("<bool name=\"ShowHiddenGames\" value=\"true\" />"));
+}

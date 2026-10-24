@@ -1,3 +1,6 @@
+// Each test crate uses only part of this helper.
+#![allow(dead_code)]
+
 //! A tiny HTTP/1.1 server for tests: answers from a handler and records every request.
 
 use std::io::{BufRead, BufReader, Write};

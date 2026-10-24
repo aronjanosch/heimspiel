@@ -12,6 +12,24 @@ use crate::output::esde::EsDe;
 use crate::romm::Romm;
 use crate::source::{heroic, manual, romm, steam};
 
+/// heimspiel's own places on this machine.
+pub struct Env {
+    pub user_home: PathBuf,
+    /// `~/.config/heimspiel`
+    pub config_dir: PathBuf,
+    /// `~/.cache/heimspiel`
+    pub cache_dir: PathBuf,
+    /// Command line that runs this heimspiel binary, for the ES-DE hook.
+    pub heimspiel: Vec<String>,
+}
+
+impl Env {
+    /// Where the `game-start` hook keeps games fetched from RomM.
+    pub fn game_cache(&self) -> PathBuf {
+        self.cache_dir.join("romm/games")
+    }
+}
+
 /// What a sync did, for the user.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -23,14 +41,8 @@ pub struct Report {
     pub notes: Vec<String>,
 }
 
-/// `config_dir` and `cache_dir` are heimspiel's own folders (`~/.config/heimspiel`,
-/// `~/.cache/heimspiel`).
-pub fn sync(
-    config: &Config,
-    user_home: &Path,
-    config_dir: &Path,
-    cache_dir: &Path,
-) -> anyhow::Result<Report> {
+pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
+    let user_home = env.user_home.as_path();
     let es_de_home = config
         .es_de
         .home
@@ -90,17 +102,12 @@ pub fn sync(
     library.entries.extend(manual::entries(&files)?);
 
     if let Some(romm_config) = &config.romm {
-        let token_file = romm_config
-            .token_file
-            .as_deref()
-            .map(|f| expand(f, user_home))
-            .unwrap_or_else(|| config_dir.join("romm-token"));
-        let token = read_token(&token_file)?;
+        let token = read_token(&romm_config.token_file(user_home, &env.config_dir))?;
         let client = Romm::new(&romm_config.url, &token);
         library.entries.extend(romm::entries(
             &client,
             &romm_config.platforms,
-            &cache_dir.join("romm/covers"),
+            &env.cache_dir.join("romm/covers"),
         )?);
     }
 
@@ -112,14 +119,18 @@ pub fn sync(
             SourceKind::RomM => report.romm += 1,
         }
     }
-    EsDe::locate(&es_de_home, user_home)?
-        .write(&library)
-        .context("writing to ES-DE")?;
+    let esde = EsDe::locate(&es_de_home, user_home)?.game_cache(&env.game_cache());
+    esde.write(&library).context("writing to ES-DE")?;
+    if config.romm.is_some() && esde.install_hook(&env.heimspiel)? {
+        report.notes.push(
+            "ES-DE: turned on event scripts and installed the game-start hook for RomM".into(),
+        );
+    }
     Ok(report)
 }
 
 /// Reads the RomM token, refusing a file that others can read.
-fn read_token(path: &Path) -> anyhow::Result<String> {
+pub fn read_token(path: &Path) -> anyhow::Result<String> {
     use std::os::unix::fs::PermissionsExt;
     let mode = fs::metadata(path)
         .with_context(|| format!("reading the RomM token from {}", path.display()))?

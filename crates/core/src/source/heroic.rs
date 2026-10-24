@@ -7,7 +7,7 @@ use anyhow::Context;
 use serde_json::Value;
 
 use crate::desktop;
-use crate::library::{Entry, SourceKind};
+use crate::library::{Entry, Launch, SourceKind};
 
 /// Reads the installed games from Heroic's config folder (`~/.config/heroic` or its Flatpak twin).
 /// `command` starts Heroic itself (AppImage path, `heroic`, or `flatpak run …`).
@@ -33,9 +33,12 @@ pub fn entries(config: &Path, command: &[String]) -> anyhow::Result<Vec<Entry>> 
                 source: SourceKind::Heroic,
                 id: format!("{}:{app_name}", runner.name),
                 title: title.to_owned(),
-                exec: desktop::exec(&args),
-                working_dir: None,
+                launch: Launch::Command {
+                    exec: desktop::exec(&args),
+                    working_dir: None,
+                },
                 cover: None,
+                metadata: Default::default(),
             });
         }
     }

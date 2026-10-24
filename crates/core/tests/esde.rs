@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use heimspiel_core::library::{Entry, Library, SourceKind};
+use heimspiel_core::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
 use heimspiel_core::output::esde::EsDe;
 
 struct Setup {
@@ -41,9 +41,27 @@ fn steam(id: &str, title: &str) -> Entry {
         source: SourceKind::Steam,
         id: id.into(),
         title: title.into(),
-        exec: format!("steam steam://rungameid/{id}"),
-        working_dir: None,
+        launch: Launch::Command {
+            exec: format!("steam steam://rungameid/{id}"),
+            working_dir: None,
+        },
         cover: None,
+        metadata: Default::default(),
+    }
+}
+
+fn romm(rom_id: u64, platform: &str, file_name: &str, title: &str) -> Entry {
+    Entry {
+        source: SourceKind::RomM,
+        id: rom_id.to_string(),
+        title: title.into(),
+        launch: Launch::File {
+            platform: platform.into(),
+            file_name: file_name.into(),
+            location: FileLocation::RomM { rom_id },
+        },
+        cover: None,
+        metadata: Metadata::default(),
     }
 }
 
@@ -175,9 +193,12 @@ fn gives_entries_with_the_same_title_their_own_files() {
         source: SourceKind::Heroic,
         id: id.into(),
         title: "Fallout".into(),
-        exec: format!("heroic --no-gui heroic://launch?appName={id}"),
-        working_dir: None,
+        launch: Launch::Command {
+            exec: format!("heroic --no-gui heroic://launch?appName={id}"),
+            working_dir: None,
+        },
         cover: None,
+        metadata: Default::default(),
     };
     let lib = library(vec![heroic("gog:1"), heroic("legendary:2")]);
 
@@ -212,4 +233,70 @@ fn places_covers_in_the_media_folder_and_removes_them_with_the_entry() {
     s.esde.write(&library(vec![])).unwrap();
 
     assert!(!placed.exists());
+}
+
+#[test]
+fn writes_a_placeholder_named_like_the_game_file_with_its_metadata() {
+    let s = setup();
+    let mut lode = romm(3039, "n64", "Lode Runner 3-D (USA).n64", "Lode Runner 3-D");
+    lode.metadata = Metadata {
+        description: Some("Outrun monsters.".into()),
+        release_date: Some("1999-03-26".into()),
+        developer: Some("Big Bang".into()),
+        publisher: Some("Infogrames".into()),
+        genre: Some("Platform".into()),
+        players: Some("1".into()),
+        rating: Some(0.635),
+    };
+
+    s.esde.write(&library(vec![lode])).unwrap();
+
+    let placeholder = fs::read(s.roms.join("n64/Lode Runner 3-D (USA).n64")).unwrap();
+    assert!(placeholder.len() < 100);
+    let gamelist = read(s.home.join("gamelists/n64/gamelist.xml"));
+    for field in [
+        "<path>./Lode Runner 3-D (USA).n64</path>",
+        "<name>Lode Runner 3-D</name>",
+        "<desc>Outrun monsters.</desc>",
+        "<releasedate>19990326T000000</releasedate>",
+        "<developer>Big Bang</developer>",
+        "<publisher>Infogrames</publisher>",
+        "<genre>Platform</genre>",
+        "<players>1</players>",
+        "<rating>0.6</rating>",
+    ] {
+        assert!(gamelist.contains(field), "missing {field} in {gamelist}");
+    }
+}
+
+#[test]
+fn puts_platforms_into_the_system_es_de_names_them() {
+    let s = setup();
+
+    s.esde
+        .write(&library(vec![romm(1, "ngc", "Pikmin (USA).iso", "Pikmin")]))
+        .unwrap();
+
+    assert!(s.roms.join("gc/Pikmin (USA).iso").exists());
+}
+
+#[test]
+fn removes_placeholders_of_games_gone_from_romm_but_never_a_real_game_file() {
+    let s = setup();
+    s.esde
+        .write(&library(vec![
+            romm(1, "n64", "Gone (USA).z64", "Gone"),
+            romm(2, "n64", "Mine (USA).z64", "Mine"),
+        ]))
+        .unwrap();
+    // The user replaced one Placeholder with the real game file.
+    fs::write(s.roms.join("n64/Mine (USA).z64"), vec![0x80u8; 4096]).unwrap();
+
+    s.esde.write(&library(vec![])).unwrap();
+
+    assert!(!s.roms.join("n64/Gone (USA).z64").exists());
+    assert_eq!(
+        fs::read(s.roms.join("n64/Mine (USA).z64")).unwrap().len(),
+        4096
+    );
 }

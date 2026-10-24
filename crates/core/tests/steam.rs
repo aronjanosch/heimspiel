@@ -45,7 +45,7 @@ fn reads_installed_games_from_every_library_folder() {
     assert_eq!(entries[0].source, SourceKind::Steam);
     assert_eq!(entries[0].id, "570");
     assert_eq!(entries[0].title, "Dota 2");
-    assert_eq!(entries[0].exec, "steam steam://rungameid/570");
+    assert_eq!(entries[0].exec(), Some("steam steam://rungameid/570"));
     assert_eq!(entries[1].title, "Into the Breach");
 }
 

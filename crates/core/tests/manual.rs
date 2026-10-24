@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use heimspiel_core::library::SourceKind;
+use heimspiel_core::library::{Launch, SourceKind};
 use heimspiel_core::source::manual;
 
 #[test]
@@ -23,8 +23,13 @@ fn reads_name_command_and_working_dir_from_listed_desktop_files() {
     assert_eq!(e.source, SourceKind::Manual);
     assert_eq!(e.id, "7th Heaven");
     assert_eq!(e.title, "7th Heaven");
-    assert_eq!(e.exec, "\"/apps/7th Heaven\" --launch");
-    assert_eq!(e.working_dir, Some(PathBuf::from("/apps")));
+    assert_eq!(
+        e.launch,
+        Launch::Command {
+            exec: "\"/apps/7th Heaven\" --launch".into(),
+            working_dir: Some(PathBuf::from("/apps")),
+        }
+    );
 }
 
 #[test]

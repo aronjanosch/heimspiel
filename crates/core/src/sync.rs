@@ -9,7 +9,8 @@ use anyhow::{Context, bail};
 use crate::config::{Config, expand};
 use crate::library::{Library, SourceKind};
 use crate::output::esde::EsDe;
-use crate::source::{heroic, manual, steam};
+use crate::romm::Romm;
+use crate::source::{heroic, manual, romm, steam};
 
 /// What a sync did, for the user.
 #[derive(Debug, Default)]
@@ -17,11 +18,19 @@ pub struct Report {
     pub steam: usize,
     pub heroic: usize,
     pub manual: usize,
+    pub romm: usize,
     /// Sources that were skipped, and why.
     pub notes: Vec<String>,
 }
 
-pub fn sync(config: &Config, user_home: &Path) -> anyhow::Result<Report> {
+/// `config_dir` and `cache_dir` are heimspiel's own folders (`~/.config/heimspiel`,
+/// `~/.cache/heimspiel`).
+pub fn sync(
+    config: &Config,
+    user_home: &Path,
+    config_dir: &Path,
+    cache_dir: &Path,
+) -> anyhow::Result<Report> {
     let es_de_home = config
         .es_de
         .home
@@ -80,17 +89,53 @@ pub fn sync(config: &Config, user_home: &Path) -> anyhow::Result<Report> {
         .collect();
     library.entries.extend(manual::entries(&files)?);
 
+    if let Some(romm_config) = &config.romm {
+        let token_file = romm_config
+            .token_file
+            .as_deref()
+            .map(|f| expand(f, user_home))
+            .unwrap_or_else(|| config_dir.join("romm-token"));
+        let token = read_token(&token_file)?;
+        let client = Romm::new(&romm_config.url, &token);
+        library.entries.extend(romm::entries(
+            &client,
+            &romm_config.platforms,
+            &cache_dir.join("romm/covers"),
+        )?);
+    }
+
     for entry in &library.entries {
         match entry.source {
             SourceKind::Steam => report.steam += 1,
             SourceKind::Heroic => report.heroic += 1,
             SourceKind::Manual => report.manual += 1,
+            SourceKind::RomM => report.romm += 1,
         }
     }
     EsDe::locate(&es_de_home, user_home)?
         .write(&library)
         .context("writing to ES-DE")?;
     Ok(report)
+}
+
+/// Reads the RomM token, refusing a file that others can read.
+fn read_token(path: &Path) -> anyhow::Result<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(path)
+        .with_context(|| format!("reading the RomM token from {}", path.display()))?
+        .permissions()
+        .mode();
+    if mode & 0o077 != 0 {
+        bail!(
+            "{} is readable by others; run `chmod 600` on it",
+            path.display()
+        );
+    }
+    let token = fs::read_to_string(path)?.trim().to_owned();
+    if token.is_empty() {
+        bail!("{} is empty", path.display());
+    }
+    Ok(token)
 }
 
 fn steam_root(config: &Config, user_home: &Path) -> Option<PathBuf> {

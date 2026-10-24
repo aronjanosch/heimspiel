@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::library::{Entry, SourceKind};
+use crate::library::{Entry, Launch, SourceKind};
 
 /// `StateFlags` bit Steam sets once an app is fully installed.
 const FULLY_INSTALLED: u32 = 4;
@@ -53,11 +53,14 @@ fn entry_from_manifest(text: &str, root: &Path, command: &str) -> Option<Entry> 
     }
     Some(Entry {
         source: SourceKind::Steam,
-        exec: format!("{command} steam://rungameid/{appid}"),
+        launch: Launch::Command {
+            exec: format!("{command} steam://rungameid/{appid}"),
+            working_dir: None,
+        },
         cover: cover(root, appid),
         id: appid.to_owned(),
         title: name.to_owned(),
-        working_dir: None,
+        metadata: Default::default(),
     })
 }
 

@@ -6,5 +6,6 @@ pub mod config;
 pub mod desktop;
 pub mod library;
 pub mod output;
+pub mod romm;
 pub mod source;
 pub mod sync;

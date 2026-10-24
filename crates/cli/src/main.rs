@@ -30,19 +30,22 @@ enum Command {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let user_home = env::home_dir().context("no home directory")?;
-    let config_path = cli.config.unwrap_or_else(|| {
-        env::var_os("XDG_CONFIG_HOME")
+    let xdg = |var: &str, fallback: &str| {
+        env::var_os(var)
             .map(PathBuf::from)
-            .unwrap_or_else(|| user_home.join(".config"))
-            .join("heimspiel/config.toml")
-    });
+            .unwrap_or_else(|| user_home.join(fallback))
+            .join("heimspiel")
+    };
+    let config_dir = xdg("XDG_CONFIG_HOME", ".config");
+    let cache_dir = xdg("XDG_CACHE_HOME", ".cache");
+    let config_path = cli.config.unwrap_or_else(|| config_dir.join("config.toml"));
     let config = Config::load(&config_path)?;
     match cli.command {
         Command::Sync => {
-            let report = heimspiel_core::sync::sync(&config, &user_home)?;
+            let report = heimspiel_core::sync::sync(&config, &user_home, &config_dir, &cache_dir)?;
             println!(
-                "Synced {} Steam, {} Heroic and {} manual games into ES-DE.",
-                report.steam, report.heroic, report.manual
+                "Synced {} Steam, {} Heroic, {} manual and {} RomM games into ES-DE.",
+                report.steam, report.heroic, report.manual, report.romm
             );
             for note in report.notes {
                 println!("{note}");

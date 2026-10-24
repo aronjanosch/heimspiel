@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, anyhow};
 
 use crate::desktop;
-use crate::library::{Entry, SourceKind};
+use crate::library::{Entry, Launch, SourceKind};
 
 pub fn entries(files: &[PathBuf]) -> anyhow::Result<Vec<Entry>> {
     files
@@ -25,9 +25,12 @@ pub fn entries(files: &[PathBuf]) -> anyhow::Result<Vec<Entry>> {
                     .to_string_lossy()
                     .into_owned(),
                 title: get("Name").ok_or_else(|| missing("Name"))?.to_owned(),
-                exec: get("Exec").ok_or_else(|| missing("Exec"))?.to_owned(),
-                working_dir: get("Path").map(PathBuf::from),
+                launch: Launch::Command {
+                    exec: get("Exec").ok_or_else(|| missing("Exec"))?.to_owned(),
+                    working_dir: get("Path").map(PathBuf::from),
+                },
                 cover: None,
+                metadata: Default::default(),
             })
         })
         .collect()

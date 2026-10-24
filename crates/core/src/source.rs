@@ -2,4 +2,5 @@
 
 pub mod heroic;
 pub mod manual;
+pub mod romm;
 pub mod steam;

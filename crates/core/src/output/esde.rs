@@ -1,13 +1,15 @@
-//! ES-DE: one `.desktop` file per Entry in the system's ROM folder, plus `gamelist.xml` and covers.
+//! ES-DE: per Entry a `.desktop` file (PC games) or a Placeholder (game files) in the system's ROM
+//! folder, plus its `gamelist.xml` entry and cover.
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use xmltree::{Element, EmitterConfig, XMLNode};
 
-use crate::library::{Entry, Library, SourceKind};
+use crate::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
 
 /// The folders of one ES-DE installation.
 pub struct EsDe {
@@ -35,55 +37,85 @@ impl EsDe {
         })
     }
 
-    /// Brings every system heimspiel fills in line with `library`. Files and gamelist entries that
-    /// heimspiel did not write are left alone.
+    /// Brings every system in line with `library`. Files and gamelist entries that heimspiel did
+    /// not write are left alone.
     pub fn write(&self, library: &Library) -> anyhow::Result<()> {
-        let mut systems: BTreeMap<&str, Vec<&Entry>> =
-            SYSTEMS.iter().map(|s| (*s, Vec::new())).collect();
+        let mut systems: BTreeMap<String, Vec<&Entry>> = BTreeMap::new();
+        // Systems without Entries still need a pass, to remove what heimspiel wrote there before.
+        if let Ok(dirs) = fs::read_dir(&self.roms) {
+            for dir in dirs.filter_map(Result::ok) {
+                if dir.path().is_dir() {
+                    systems
+                        .entry(dir.file_name().to_string_lossy().into_owned())
+                        .or_default();
+                }
+            }
+        }
         for entry in &library.entries {
-            systems.entry(system(entry.source)).or_default().push(entry);
+            systems.entry(system(entry)).or_default().push(entry);
         }
         for (system, entries) in systems {
-            let dir = self.roms.join(system);
-            if entries.is_empty() && !dir.exists() {
-                continue;
-            }
-            fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-            let own = own_files(&dir)?;
-            let foreign = |file: &str| dir.join(file).exists() && !own.iter().any(|o| o == file);
-            let mut entries = entries;
-            entries.sort_by(|a, b| a.id.cmp(&b.id));
-            let mut added: Vec<(String, &str)> = Vec::new();
-            for entry in entries {
-                let stem = file_stem(&entry.title);
-                // Most likely the same game, placed by the user or ES-DE's Game Importer.
-                if foreign(&format!("{stem}.desktop")) {
-                    continue;
-                }
-                let file = (1..)
-                    .map(|n| match n {
-                        1 => format!("{stem}.desktop"),
-                        n => format!("{stem} ({n}).desktop"),
-                    })
-                    .find(|f| !foreign(f) && !added.iter().any(|(a, _)| a == f))
-                    .unwrap();
-                write_if_changed(&dir.join(&file), desktop_file(entry).as_bytes())?;
-                if let Some(cover) = &entry.cover {
-                    self.place_cover(system, &file, cover)?;
-                }
-                added.push((file, entry.title.as_str()));
-            }
-            let mut removed = Vec::new();
-            for file in own {
-                if !added.iter().any(|(name, _)| *name == file) {
-                    fs::remove_file(dir.join(&file)).with_context(|| format!("removing {file}"))?;
-                    self.remove_covers(system, &file)?;
-                    removed.push(file);
-                }
-            }
-            self.update_gamelist(system, &added, &removed)?;
+            self.write_system(&system, entries)?;
         }
         Ok(())
+    }
+
+    fn write_system(&self, system: &str, mut entries: Vec<&Entry>) -> anyhow::Result<()> {
+        let dir = self.roms.join(system);
+        if entries.is_empty() && !dir.exists() {
+            return Ok(());
+        }
+        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let own = own_files(&dir)?;
+        let foreign = |file: &str| dir.join(file).exists() && !own.iter().any(|o| o == file);
+        entries.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut added: Vec<(String, &Entry)> = Vec::new();
+        for entry in entries {
+            let (stem, ext, content) = match &entry.launch {
+                Launch::Command { .. } => (
+                    file_stem(&entry.title),
+                    ".desktop".to_owned(),
+                    desktop_file(entry),
+                ),
+                Launch::File {
+                    file_name,
+                    location,
+                    ..
+                } => {
+                    let name = file_stem(file_name);
+                    let (stem, ext) = match name.rfind('.') {
+                        Some(dot) if dot > 0 => (name[..dot].to_owned(), name[dot..].to_owned()),
+                        _ => (name, String::new()),
+                    };
+                    (stem, ext, placeholder(location))
+                }
+            };
+            // Most likely the same game, placed by the user or ES-DE's Game Importer.
+            if foreign(&format!("{stem}{ext}")) {
+                continue;
+            }
+            let file = (1..)
+                .map(|n| match n {
+                    1 => format!("{stem}{ext}"),
+                    n => format!("{stem} ({n}){ext}"),
+                })
+                .find(|f| !foreign(f) && !added.iter().any(|(a, _)| a == f))
+                .unwrap();
+            write_if_changed(&dir.join(&file), content.as_bytes())?;
+            if let Some(cover) = &entry.cover {
+                self.place_cover(system, &file, cover)?;
+            }
+            added.push((file, entry));
+        }
+        let mut removed = Vec::new();
+        for file in own {
+            if !added.iter().any(|(name, _)| *name == file) {
+                fs::remove_file(dir.join(&file)).with_context(|| format!("removing {file}"))?;
+                self.remove_covers(system, &file)?;
+                removed.push(file);
+            }
+        }
+        self.update_gamelist(system, &added, &removed)
     }
 
     /// Adds a `<game>` for every added file that has none yet and drops those of removed files;
@@ -91,7 +123,7 @@ impl EsDe {
     fn update_gamelist(
         &self,
         system: &str,
-        added: &[(String, &str)],
+        added: &[(String, &Entry)],
         removed: &[String],
     ) -> anyhow::Result<()> {
         let path = self
@@ -99,6 +131,9 @@ impl EsDe {
             .join("gamelists")
             .join(system)
             .join("gamelist.xml");
+        if added.is_empty() && removed.is_empty() && !path.exists() {
+            return Ok(());
+        }
         let mut doc = Gamelist::read(&path)?;
         let list = doc.game_list();
         let before = list.children.len();
@@ -106,19 +141,15 @@ impl EsDe {
             game_path_of(n).is_none_or(|p| !removed.iter().any(|file| p == format!("./{file}")))
         });
         let mut changed = list.children.len() != before;
-        for (file, title) in added {
+        for (file, entry) in added {
             let game_path = format!("./{file}");
             if !list
                 .children
                 .iter()
                 .any(|n| game_path_of(n).as_deref() == Some(game_path.as_str()))
             {
-                let mut game = Element::new("game");
-                game.children
-                    .push(XMLNode::Element(text_element("path", &game_path)));
-                game.children
-                    .push(XMLNode::Element(text_element("name", title)));
-                list.children.push(XMLNode::Element(game));
+                list.children
+                    .push(XMLNode::Element(game(&game_path, entry)));
                 changed = true;
             }
         }
@@ -202,16 +233,32 @@ impl Gamelist {
 /// Marks the `.desktop` files heimspiel owns; files without it belong to the user.
 const MARKER: &str = "X-Heimspiel-Id=";
 
-/// Every ES-DE system heimspiel writes into.
-const SYSTEMS: [&str; 3] = ["steam", "epic", "desktop"];
+/// First line of every Placeholder heimspiel writes.
+const PLACEHOLDER: &str = "heimspiel-placeholder ";
 
-/// The ES-DE system each Source's games go into.
-fn system(source: SourceKind) -> &'static str {
-    match source {
-        SourceKind::Steam => "steam",
-        SourceKind::Heroic => "epic",
-        SourceKind::Manual => "desktop",
+/// The ES-DE system an Entry goes into.
+fn system(entry: &Entry) -> String {
+    let platform = match (&entry.launch, entry.source) {
+        (Launch::File { platform, .. }, _) => platform.as_str(),
+        (_, SourceKind::Steam) => return "steam".into(),
+        (_, SourceKind::Heroic) => return "epic".into(),
+        (_, _) => return "desktop".into(),
+    };
+    // RomM platform slugs that ES-DE names differently; all others match.
+    match platform {
+        "dc" => "dreamcast",
+        "g-and-w" => "gameandwatch",
+        "lynx" => "atarilynx",
+        "ngc" => "gc",
+        "o2em" => "odyssey2",
+        "prboom" => "doom",
+        "sg1000" => "sg-1000",
+        "sms" => "mastersystem",
+        "snes-msu1" => "snes",
+        "zxs" => "zxspectrum",
+        other => other,
     }
+    .to_owned()
 }
 
 fn desktop_file(entry: &Entry) -> String {
@@ -219,24 +266,46 @@ fn desktop_file(entry: &Entry) -> String {
         SourceKind::Steam => "steam",
         SourceKind::Heroic => "heroic",
         SourceKind::Manual => "manual",
+        SourceKind::RomM => "romm",
+    };
+    let Launch::Command { exec, working_dir } = &entry.launch else {
+        unreachable!("only Command Entries become .desktop files");
     };
     let mut text = format!(
-        "[Desktop Entry]\nType=Application\nName={}\nExec={}\n{MARKER}{source}:{}\n",
-        entry.title, entry.exec, entry.id
+        "[Desktop Entry]\nType=Application\nName={}\nExec={exec}\n{MARKER}{source}:{}\n",
+        entry.title, entry.id
     );
-    if let Some(dir) = &entry.working_dir {
+    if let Some(dir) = working_dir {
         text += &format!("Path={}\n", dir.display());
     }
     text
 }
 
-/// Names of the `.desktop` files in `dir` that carry heimspiel's marker.
+fn placeholder(location: &FileLocation) -> String {
+    let FileLocation::RomM { rom_id } = location;
+    format!("{PLACEHOLDER}romm:{rom_id}\n")
+}
+
+/// Names of the files in `dir` that heimspiel wrote: marked `.desktop` files and Placeholders.
+/// Only small files are opened, so real game files are never read.
 fn own_files(dir: &Path) -> anyhow::Result<Vec<String>> {
     let mut files = Vec::new();
     for item in fs::read_dir(dir)? {
-        let path = item?.path();
-        let is_own = path.extension().is_some_and(|e| e == "desktop")
-            && fs::read_to_string(&path).is_ok_and(|t| t.lines().any(|l| l.starts_with(MARKER)));
+        let item = item?;
+        let meta = item.metadata()?;
+        if !meta.is_file() || meta.len() > 64 * 1024 {
+            continue;
+        }
+        let path = item.path();
+        let mut head = String::new();
+        let _ = fs::File::open(&path)?
+            .take(64 * 1024)
+            .read_to_string(&mut head);
+        let is_own = if path.extension().is_some_and(|e| e == "desktop") {
+            head.lines().any(|l| l.starts_with(MARKER))
+        } else {
+            head.starts_with(PLACEHOLDER)
+        };
         if is_own && let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             files.push(name.to_owned());
         }
@@ -244,18 +313,61 @@ fn own_files(dir: &Path) -> anyhow::Result<Vec<String>> {
     Ok(files)
 }
 
+/// The file name without its last extension, as ES-DE names media files.
 fn stem_of(file: &str) -> &str {
-    file.strip_suffix(".desktop").unwrap_or(file)
+    match file.rfind('.') {
+        Some(dot) if dot > 0 => &file[..dot],
+        _ => file,
+    }
 }
 
-/// A file name ES-DE shows well: the title without path separators.
+/// A safe file name: no path separators, no leading dots.
 fn file_stem(title: &str) -> String {
-    title.replace(['/', '\\'], "-")
+    title
+        .replace(['/', '\\'], "-")
+        .trim_start_matches('.')
+        .to_owned()
 }
 
 fn game_path_of(node: &XMLNode) -> Option<String> {
     let game = node.as_element().filter(|e| e.name == "game")?;
     Some(game.get_child("path")?.get_text()?.into_owned())
+}
+
+/// A new `<game>` with the Entry's title and Metadata, in ES-DE's field formats.
+fn game(path: &str, entry: &Entry) -> Element {
+    let Metadata {
+        description,
+        release_date,
+        developer,
+        publisher,
+        genre,
+        players,
+        rating,
+    } = &entry.metadata;
+    let mut game = Element::new("game");
+    let mut add = |name: &str, value: Option<String>| {
+        if let Some(value) = value {
+            game.children
+                .push(XMLNode::Element(text_element(name, &value)));
+        }
+    };
+    add("path", Some(path.to_owned()));
+    add("name", Some(entry.title.clone()));
+    add("desc", description.clone());
+    // ES-DE rates in half stars: tenths between 0 and 1.
+    add("rating", rating.map(|r| format!("{r:.1}")));
+    add(
+        "releasedate",
+        release_date
+            .as_ref()
+            .map(|d| format!("{}T000000", d.replace('-', ""))),
+    );
+    add("developer", developer.clone());
+    add("publisher", publisher.clone());
+    add("genre", genre.clone());
+    add("players", players.clone());
+    game
 }
 
 fn text_element(name: &str, text: &str) -> Element {

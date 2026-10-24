@@ -14,6 +14,7 @@ pub struct Config {
     pub steam: SteamConfig,
     pub heroic: HeroicConfig,
     pub manual: ManualConfig,
+    pub romm: Option<RommConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -46,6 +47,18 @@ pub struct HeroicConfig {
 pub struct ManualConfig {
     /// `.desktop` files of PC games installed by hand that should appear in ES-DE.
     pub desktop_files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct RommConfig {
+    /// Base URL of the RomM server, e.g. `http://romm.lan:8080`.
+    pub url: String,
+    /// File holding the API token, readable only by the user; default
+    /// `~/.config/heimspiel/romm-token`.
+    pub token_file: Option<PathBuf>,
+    /// RomM platform slugs to show in ES-DE, e.g. `["n64", "gba"]`.
+    pub platforms: Vec<String>,
 }
 
 impl Config {

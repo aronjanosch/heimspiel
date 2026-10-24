@@ -74,8 +74,10 @@ fn launches_through_heroic_without_its_window() {
     let entries = heroic::entries(tmp.path(), &command()).unwrap();
 
     assert_eq!(
-        entries[0].exec,
-        r#""/opt/Heroic Games/Heroic.AppImage" --no-gui "heroic://launch?appName=1584866499&runner=gog""#
+        entries[0].exec(),
+        Some(
+            r#""/opt/Heroic Games/Heroic.AppImage" --no-gui "heroic://launch?appName=1584866499&runner=gog""#
+        )
     );
 }
 

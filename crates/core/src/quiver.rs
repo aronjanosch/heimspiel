@@ -3,7 +3,9 @@
 //!
 //! Quiver 3.5.1 quirks, see docs/research/2026-10-23-tests.md (test 1): `--download` installs but
 //! never exits, so completion is detected from `installed-build.txt`; two `apps.json` entries for
-//! the same repository get mixed up, so there is one entry per repository.
+//! the same repository get mixed up, so there is one entry per repository. For apps in Quiver's own
+//! catalog the CLI finds no download unless a version is pinned (`StartupVersionResolver.cs`
+//! skips GitHub and leaves the release unset), so heimspiel pins one.
 
 use std::fs;
 use std::os::unix::process::CommandExt;
@@ -16,6 +18,7 @@ use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
 use crate::port::QuiverApp;
+use crate::process::stop;
 
 pub const APPIMAGE: &str = "QuiverLauncher-linux-x64.AppImage";
 
@@ -76,8 +79,9 @@ impl Quiver {
         Ok(true)
     }
 
-    /// Adds or updates the app's entry in `apps.json`, keeping every other entry.
-    pub fn ensure_entry(&self, app: &QuiverApp) -> anyhow::Result<()> {
+    /// Adds or updates the app's entry in `apps.json`, keeping every other entry. `version` pins
+    /// the release to install; `None` keeps the pinned one.
+    pub fn ensure_entry(&self, app: &QuiverApp, version: Option<&str>) -> anyhow::Result<()> {
         let path = self.dir.join("apps.json");
         let mut doc: Value = match fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text)
@@ -87,7 +91,14 @@ impl Quiver {
         let apps = doc["apps"]
             .as_array_mut()
             .context("apps.json has no apps list")?;
-        let entry = json!({
+        let existing = apps
+            .iter()
+            .position(|a| a["repository"] == app.repository.as_str());
+        let pinned = match version {
+            Some(version) => Some(Value::from(version)),
+            None => existing.and_then(|i| apps[i].get("preferredVersion").cloned()),
+        };
+        let mut entry = json!({
             "name": app.name,
             "repository": app.repository,
             "folderName": app.name,
@@ -95,17 +106,35 @@ impl Quiver {
             // An update check inside `--run` can hang like `--download`.
             "autoUpdate": false,
         });
-        match apps
-            .iter_mut()
-            .find(|a| a["repository"] == app.repository.as_str())
-        {
-            Some(existing) if *existing == entry => return Ok(()),
-            Some(existing) => *existing = entry,
+        if let Some(pinned) = pinned {
+            entry["preferredVersion"] = pinned;
+        }
+        match existing {
+            Some(i) if apps[i] == entry => return Ok(()),
+            Some(i) => apps[i] = entry,
             None => apps.push(entry),
         }
         let tmp = path.with_extension("json.heimspiel-tmp");
         fs::write(&tmp, serde_json::to_string_pretty(&doc)? + "\n")?;
         fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))
+    }
+
+    /// The installed program: as Quiver noted it in `selected_executable.txt`, or the only
+    /// executable file in the app folder (Quiver writes no note for a single AppImage).
+    pub fn executable(&self, app: &QuiverApp) -> Option<PathBuf> {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = self.dir.join("Apps").join(&app.name);
+        if let Ok(note) = fs::read_to_string(folder.join("selected_executable.txt")) {
+            let path = PathBuf::from(note.trim());
+            return path.is_file().then_some(path);
+        }
+        let mut programs = fs::read_dir(&folder).ok()?.filter_map(|f| {
+            let path = f.ok()?.path();
+            let mode = fs::metadata(&path).ok()?.permissions().mode();
+            (path.is_file() && mode & 0o111 != 0).then_some(path)
+        });
+        let program = programs.next()?;
+        programs.next().is_none().then_some(program)
     }
 
     pub fn is_installed(&self, app: &QuiverApp) -> bool {
@@ -179,11 +208,18 @@ impl Quiver {
     }
 }
 
-fn stop(child: &mut Child) {
-    let group = format!("-{}", child.id());
-    let killed = Command::new("kill").args(["-TERM", "--", &group]).status();
-    if !killed.is_ok_and(|s| s.success()) {
-        let _ = child.kill();
-    }
-    let _ = child.wait();
+/// The tag of the newest release of `owner/repo` on GitHub.
+pub fn latest_tag(repository: &str) -> anyhow::Result<String> {
+    let url = format!("https://api.github.com/repos/{repository}/releases/latest");
+    let text = ureq::get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .with_context(|| format!("asking GitHub for the latest release of {repository}"))?
+        .body_mut()
+        .read_to_string()?;
+    let release: Value = serde_json::from_str(&text)?;
+    release["tag_name"]
+        .as_str()
+        .map(str::to_owned)
+        .with_context(|| format!("GitHub lists no release for {repository}"))
 }

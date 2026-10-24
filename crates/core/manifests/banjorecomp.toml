@@ -1,0 +1,20 @@
+# Banjo: Recompiled, a native port of Banjo-Kazooie (N64, USA 1.0 only; Rev A is not accepted).
+# Hash, game id and config folder: BanjoRecomp src/main/main.cpp, include/banjo_config.h (v1.0.2).
+id = "banjorecomp"
+title = "Banjo: Recompiled"
+
+[quiver]
+name = "BanjoRecomp"
+repository = "BanjoRecomp/BanjoRecomp"
+asset-filter = "Linux-X64.tar.gz"
+
+[original]
+platform = "n64"
+igdb-id = 2148
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "BanjoRecompiled"
+game-id = "bk.n64.us.1.0"
+xxh3 = "0x1B67585D56E07F8C"

@@ -2,18 +2,33 @@
 //! Port starts without asking for anything.
 
 use std::fs;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
+use sha1::{Digest, Sha1};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::port::Provide;
+use crate::process::stop;
 
-/// Provisions the Original for `spec`. `config_home` stands for `~/.config`. `fetch_original` is
-/// only called when the Port does not have a valid copy yet.
+/// The user's base folders; tests point them elsewhere.
+pub struct Homes {
+    /// `~/.config`
+    pub config: PathBuf,
+    /// `~/.local/share`
+    pub data: PathBuf,
+}
+
+/// Provisions the Original for `spec`. `port_exe` is the installed Port, needed by kinds that let
+/// the Port do the work. `fetch_original` is only called when the Port has no valid copy yet.
 pub fn provide(
     spec: &Provide,
-    config_home: &Path,
+    homes: &Homes,
+    port_exe: Option<&Path>,
     fetch_original: impl FnOnce() -> anyhow::Result<PathBuf>,
 ) -> anyhow::Result<()> {
     match spec {
@@ -22,15 +37,11 @@ pub fn provide(
             game_id,
             xxh3,
         } => {
-            let target = config_home.join(config_dir).join(format!("{game_id}.z64"));
+            let target = homes.config.join(config_dir).join(format!("{game_id}.z64"));
             if fs::read(&target).is_ok_and(|bytes| xxh3_64(&bytes) == *xxh3) {
                 return Ok(());
             }
-            let original = fetch_original()?;
-            let mut rom =
-                fs::read(&original).with_context(|| format!("reading {}", original.display()))?;
-            to_big_endian(&mut rom).with_context(|| format!("reading {}", original.display()))?;
-            rom.resize(rom.len().next_multiple_of(4), 0);
+            let (original, rom) = read_rom(fetch_original)?;
             // librecomp deletes a stored ROM with the wrong hash, so only a verified copy goes in.
             let actual = xxh3_64(&rom);
             if actual != *xxh3 {
@@ -39,13 +50,100 @@ pub fn provide(
                     original.display()
                 );
             }
-            let dir = target.parent().unwrap();
-            fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-            let tmp = target.with_extension("part");
-            fs::write(&tmp, &rom).with_context(|| format!("writing {}", tmp.display()))?;
-            fs::rename(&tmp, &target).with_context(|| format!("replacing {}", target.display()))
+            write_atomically(&target, &rom)
+        }
+        Provide::O2r { archive, sha1 } => {
+            let archive = homes.data.join(archive);
+            if archive.is_file() {
+                return Ok(());
+            }
+            let (original, rom) = read_rom(fetch_original)?;
+            let actual = format!("{:x}", Sha1::digest(&rom));
+            if !sha1.iter().any(|s| s.eq_ignore_ascii_case(&actual)) {
+                bail!(
+                    "{} does not match a release this Port supports (SHA-1 {actual})",
+                    original.display()
+                );
+            }
+            let exe = port_exe.context("the Port is not installed")?;
+            let dir = archive.parent().unwrap();
+            let rom_file = dir.join("heimspiel-original.z64");
+            write_atomically(&rom_file, &rom)?;
+            let result = extract(exe, &rom_file, &archive);
+            let _ = fs::remove_file(&rom_file);
+            result
         }
     }
+}
+
+/// Fetches the Original and brings it into big-endian order, padded to whole words.
+fn read_rom(
+    fetch_original: impl FnOnce() -> anyhow::Result<PathBuf>,
+) -> anyhow::Result<(PathBuf, Vec<u8>)> {
+    let original = fetch_original()?;
+    let mut rom = fs::read(&original).with_context(|| format!("reading {}", original.display()))?;
+    to_big_endian(&mut rom).with_context(|| format!("reading {}", original.display()))?;
+    rom.resize(rom.len().next_multiple_of(4), 0);
+    Ok((original, rom))
+}
+
+/// Runs the Port with the ROM until it has written `archive`, then stops it: it would otherwise
+/// wait at its "Run?" question.
+fn extract(exe: &Path, rom: &Path, archive: &Path) -> anyhow::Result<()> {
+    let log_path = archive.with_file_name("heimspiel-extract.log");
+    let log = fs::File::create(&log_path)?;
+    let mut child = Command::new(exe)
+        .arg(rom)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .process_group(0)
+        .spawn()
+        .with_context(|| format!("starting {}", exe.display()))?;
+    let started = Instant::now();
+    let mut last_size = None;
+    let mut stable_since = Instant::now();
+    loop {
+        let size = fs::metadata(archive).ok().map(|m| m.len());
+        if size != last_size {
+            last_size = size;
+            stable_since = Instant::now();
+        }
+        let said_done = fs::read_to_string(&log_path).is_ok_and(|l| l.contains("Done!"));
+        // SoH logs "Done!" after extracting; the size check covers ports that log differently.
+        if size.is_some() && (said_done || stable_since.elapsed() > Duration::from_secs(3)) {
+            stop(&mut child);
+            return Ok(());
+        }
+        if child.try_wait()?.is_some() {
+            if archive.is_file() {
+                return Ok(());
+            }
+            bail!(
+                "{} ended without writing {}; see {}",
+                exe.display(),
+                archive.display(),
+                log_path.display()
+            );
+        }
+        if started.elapsed() > Duration::from_secs(600) {
+            stop(&mut child);
+            bail!(
+                "{} did not write {} within 10 minutes",
+                exe.display(),
+                archive.display()
+            );
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn write_atomically(target: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let dir = target.parent().unwrap();
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let tmp = target.with_extension("part");
+    fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+    fs::rename(&tmp, target).with_context(|| format!("replacing {}", target.display()))
 }
 
 /// Brings an N64 ROM into big-endian (z64) order, detected from its header rather than its name:

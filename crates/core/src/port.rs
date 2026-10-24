@@ -30,14 +30,20 @@ pub struct QuiverApp {
     pub asset_filter: String,
 }
 
-/// The release of a game the Port accepts as its Original.
+/// The game a Port needs as its Original, and which of its releases it accepts.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Original {
     pub platform: String,
     pub igdb_id: u64,
+    pub releases: Vec<Release>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Release {
     pub region: String,
-    /// `None` for the first release.
+    /// `None` for the first release, `A` for "Rev A".
     #[serde(default)]
     pub revision: Option<String>,
 }
@@ -58,6 +64,14 @@ pub enum Provide {
         #[serde(deserialize_with = "hex")]
         xxh3: u64,
     },
+    /// HarbourMasters ports: started once with the ROM, they extract it into an archive in the
+    /// user data folder (`~/.local/share/<archive>`) and then ask whether to run; heimspiel stops
+    /// them there.
+    O2r {
+        archive: String,
+        /// SHA-1 of every accepted release, as big-endian ROM.
+        sha1: Vec<String>,
+    },
 }
 
 fn hex<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
@@ -73,10 +87,14 @@ impl Manifest {
 
 /// The Manifests that ship with heimspiel.
 pub fn builtin() -> Vec<Manifest> {
-    const FILES: &[(&str, &str)] = &[(
-        "zelda64recomp",
-        include_str!("../manifests/zelda64recomp.toml"),
-    )];
+    const FILES: &[(&str, &str)] = &[
+        ("banjorecomp", include_str!("../manifests/banjorecomp.toml")),
+        ("soh", include_str!("../manifests/soh.toml")),
+        (
+            "zelda64recomp",
+            include_str!("../manifests/zelda64recomp.toml"),
+        ),
+    ];
     FILES
         .iter()
         .map(|(name, text)| {
@@ -140,7 +158,9 @@ fn romm_original(entry: &Entry, original: &Original) -> Option<u64> {
     let id = &entry.identity;
     let matches = *platform == original.platform
         && id.igdb_id == Some(original.igdb_id)
-        && id.regions.contains(&original.region)
-        && id.revision == original.revision;
+        && original
+            .releases
+            .iter()
+            .any(|r| id.regions.contains(&r.region) && id.revision == r.revision);
     matches.then_some(*rom_id)
 }

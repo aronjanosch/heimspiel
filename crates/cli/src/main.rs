@@ -11,7 +11,8 @@ use heimspiel_core::fetch::Fetch;
 use heimspiel_core::hook;
 use heimspiel_core::launch::{self, PortLaunch};
 use heimspiel_core::port;
-use heimspiel_core::quiver::Quiver;
+use heimspiel_core::provision::Homes;
+use heimspiel_core::quiver::{self, Quiver};
 use heimspiel_core::romm::Romm;
 use heimspiel_core::sync::{self, Env};
 
@@ -104,15 +105,22 @@ fn main() -> anyhow::Result<()> {
             let (client, cache) = romm_access(romm, &env)?;
             let fetch = fetch(&client, &cache);
             let quiver = Quiver::new(&env.quiver_dir());
-            let config_home = env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| user_home.join(".config"));
+            let base = |var: &str, fallback: &str| {
+                env::var_os(var)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| user_home.join(fallback))
+            };
+            let homes = Homes {
+                config: base("XDG_CONFIG_HOME", ".config"),
+                data: base("XDG_DATA_HOME", ".local/share"),
+            };
             let ctx = PortLaunch {
                 manifests: &port::builtin(),
                 quiver: &quiver,
                 fetch: &fetch,
-                config_home: &config_home,
+                homes: &homes,
                 install_timeout: Duration::from_secs(30 * 60),
+                latest_version: &|app| quiver::latest_tag(&app.repository),
             };
             let result = quiver
                 .ensure_installed()

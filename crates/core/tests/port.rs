@@ -17,7 +17,7 @@ asset-filter = "Linux-X64.zip"
 [original]
 platform = "n64"
 igdb-id = 1030
-region = "USA"
+releases = [{ region = "USA" }]
 
 [provide]
 kind = "librecomp"
@@ -98,4 +98,14 @@ fn ships_a_manifest_for_zelda64recomp() {
             xxh3: 0xEF18B4A9E2386169,
         }
     );
+}
+
+#[test]
+fn built_in_manifests_have_distinct_ids() {
+    let builtin = port::builtin();
+    let mut ids: Vec<_> = builtin.iter().map(|m| m.id.as_str()).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), builtin.len());
+    assert!(ids.contains(&"banjorecomp"));
 }

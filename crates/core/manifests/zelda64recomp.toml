@@ -11,7 +11,7 @@ asset-filter = "Linux-X64.zip"
 [original]
 platform = "n64"
 igdb-id = 1030
-region = "USA"
+releases = [{ region = "USA" }]
 
 [provide]
 kind = "librecomp"

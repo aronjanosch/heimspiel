@@ -10,6 +10,7 @@ use heimspiel_core::cache::GameCache;
 use heimspiel_core::fetch::Fetch;
 use heimspiel_core::launch::{self, PortLaunch};
 use heimspiel_core::port::Manifest;
+use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::Quiver;
 use heimspiel_core::romm::Romm;
 use xxhash_rust::xxh3::xxh3_64;
@@ -29,7 +30,7 @@ asset-filter = "Linux-X64.zip"
 [original]
 platform = "n64"
 igdb-id = 1
-region = "USA"
+releases = [{{ region = "USA" }}]
 [provide]
 kind = "librecomp"
 config-dir = "TestRecompiled"
@@ -58,7 +59,8 @@ fn romm() -> FakeServer {
 /// like Quiver 3.5.1 does, unless `installs` is false.
 fn fake_quiver(dir: &Path, installs: bool) {
     let install = if installs {
-        r#"mkdir -p "$here/Apps/$2" && echo build > "$here/Apps/$2/installed-build.txt""#
+        // Copies a stand-in for the Port's program, if the test provides one.
+        r#"mkdir -p "$here/Apps/$2" && { [ ! -f "$here/port.sh" ] || cp "$here/port.sh" "$here/Apps/$2/port.appimage"; } && echo build > "$here/Apps/$2/installed-build.txt""#
     } else {
         ":"
     };
@@ -91,6 +93,15 @@ fn setup(installs: bool) -> Setup {
 }
 
 fn run(s: &Setup, server: &FakeServer, install_timeout: Duration) -> anyhow::Result<()> {
+    run_port(s, server, &manifest(), install_timeout)
+}
+
+fn run_port(
+    s: &Setup,
+    server: &FakeServer,
+    manifest: &Manifest,
+    install_timeout: Duration,
+) -> anyhow::Result<()> {
     let client = Romm::new(&server.url, "rmm_secret").backoff(Duration::ZERO);
     let cache = GameCache::new(&s.tmp.path().join("cache"), 1 << 30);
     let fetch = Fetch {
@@ -100,14 +111,19 @@ fn run(s: &Setup, server: &FakeServer, install_timeout: Duration) -> anyhow::Res
         notify_from_bytes: u64::MAX,
     };
     let quiver = Quiver::new(&s.quiver_dir);
+    let homes = Homes {
+        config: s.config_home.clone(),
+        data: s.tmp.path().join("data"),
+    };
     let ctx = PortLaunch {
-        manifests: &[manifest()],
+        manifests: std::slice::from_ref(manifest),
         quiver: &quiver,
         fetch: &fetch,
-        config_home: &s.config_home,
+        homes: &homes,
         install_timeout,
+        latest_version: &|_| Ok("1.0".into()),
     };
-    launch::run(&ctx, "testrecomp", 7)
+    launch::run(&ctx, &manifest.id, 7)
 }
 
 fn calls(s: &Setup) -> Vec<String> {
@@ -136,6 +152,8 @@ fn installs_provides_and_runs_a_port_on_its_first_start() {
         apps.contains(r#""repository": "test/TestRecomp""#),
         "{apps}"
     );
+    // Quiver only picks a download for catalog apps once a version is pinned.
+    assert!(apps.contains(r#""preferredVersion": "1.0""#), "{apps}");
 }
 
 #[test]
@@ -187,4 +205,48 @@ fn keeps_the_other_apps_in_quivers_library() {
         apps.contains(r#""repository": "test/TestRecomp""#),
         "{apps}"
     );
+}
+
+#[test]
+fn extracts_an_o2r_original_with_the_program_quiver_installed() {
+    use sha1::{Digest, Sha1};
+    let s = setup(true);
+    let archive = s.tmp.path().join("data/test/test.o2r");
+    // Like SoH: extracts the ROM it is given, then waits at "Run?".
+    let port = s.quiver_dir.join("port.sh");
+    fs::write(
+        &port,
+        format!(
+            "#!/bin/sh\nmkdir -p \"$(dirname '{a}')\"\ncp \"$1\" '{a}'\necho Done!\nexec sleep 600\n",
+            a = archive.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&port, fs::Permissions::from_mode(0o755)).unwrap();
+    let manifest = Manifest::parse(&format!(
+        r#"
+id = "testship"
+title = "Test Ship"
+[quiver]
+name = "TestShip"
+repository = "test/TestShip"
+asset-filter = ".appimage"
+[original]
+platform = "n64"
+igdb-id = 1
+releases = [{{ region = "USA" }}]
+[provide]
+kind = "o2r"
+archive = "test/test.o2r"
+sha1 = ["{:x}"]
+"#,
+        Sha1::digest(Z64)
+    ))
+    .unwrap();
+    let server = romm();
+
+    run_port(&s, &server, &manifest, Duration::from_secs(20)).unwrap();
+
+    assert_eq!(fs::read(&archive).unwrap(), Z64);
+    assert_eq!(calls(&s), ["--download TestShip", "--run TestShip"]);
 }

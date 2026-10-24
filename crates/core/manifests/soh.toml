@@ -1,0 +1,39 @@
+# Ship of Harkinian, a native port of Ocarina of Time. Started once with the ROM it extracts
+# ~/.local/share/soh/oot.o2r, then asks "Run SoH?"; afterwards it starts straight into the game
+# (docs/research/2026-10-23-tests.md, test 5).
+# Accepted N64 releases: Shipwright docs/supportedHashes.json (9.3.1), SHA-1 of the big-endian ROM.
+id = "soh"
+title = "Ship of Harkinian"
+
+[quiver]
+name = "ShipOfHarkinian"
+repository = "HarbourMasters/Shipwright"
+asset-filter = ".appimage"
+
+[original]
+platform = "n64"
+igdb-id = 1029
+releases = [
+    { region = "USA" },
+    { region = "USA", revision = "A" },
+    { region = "USA", revision = "B" },
+    { region = "Europe" },
+    { region = "Europe", revision = "A" },
+    { region = "Japan" },
+    { region = "Japan", revision = "A" },
+    { region = "Japan", revision = "B" },
+]
+
+[provide]
+kind = "o2r"
+archive = "soh/oot.o2r"
+sha1 = [
+    "ad69c91157f6705e8ab06c79fe08aad47bb57ba7", # NTSC 1.0 (US)
+    "d3ecb253776cd847a5aa63d859d8c89a2f37b364", # NTSC 1.1 (US)
+    "41b3bdc48d98c48529219919015a1af22f5057c2", # NTSC 1.2 (US)
+    "c892bbda3993e66bd0d56a10ecd30b1ee612210f", # NTSC 1.0 (JP)
+    "dbfc81f655187dc6fefd93fa6798face770d579d", # NTSC 1.1 (JP)
+    "fa5f5942b27480d60243c2d52c0e93e26b9e6b86", # NTSC 1.2 (JP)
+    "328a1f1beba30ce5e178f031662019eb32c5f3b5", # PAL 1.0
+    "cfbb98d392e4a9d39da8285d10cbef3974c2f012", # PAL 1.1
+]

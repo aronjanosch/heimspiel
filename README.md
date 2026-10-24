@@ -15,7 +15,32 @@ Heimspiel does not replace these projects. It installs, configures and connects 
 
 ## Status
 
-Planning. Nothing to install yet. Linux first, Windows later.
+Early. `heimspiel sync` already fills ES-DE from Steam, Heroic, hand-picked `.desktop` files, a RomM
+server and local folders; recomps and the setup wizard are still to come. Linux first, Windows later.
+
+## Usage
+
+Build with `cargo build --release`, then describe your setup in `~/.config/heimspiel/config.toml`.
+Every section is optional; Steam and Heroic are found on their own.
+
+```toml
+[manual]
+# PC games installed by hand that should appear in ES-DE
+desktop-files = ["~/.local/share/applications/My Game.desktop"]
+
+[romm]
+url = "http://romm.lan:8080"
+platforms = ["n64", "snes", "gba"]   # RomM platform slugs
+# token-file = "~/.config/heimspiel/romm-token"   # chmod 600
+# cache-limit-gib = 50
+
+[local]
+# folders with one subfolder per RomM platform slug, e.g. ~/Games/ROMs/n64/
+folders = ["~/Games/ROMs"]
+```
+
+Close ES-DE and run `heimspiel sync`. RomM games show up with metadata and covers and are downloaded
+the first time you start them, through an ES-DE event script that `sync` installs.
 
 ## Building blocks
 

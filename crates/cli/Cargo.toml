@@ -1,0 +1,17 @@
+[package]
+name = "heimspiel-cli"
+description = "Command-line interface of heimspiel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "heimspiel"
+path = "src/main.rs"
+
+[dependencies]
+heimspiel-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true

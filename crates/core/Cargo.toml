@@ -1,0 +1,10 @@
+[package]
+name = "heimspiel-core"
+description = "Library, Sources and Outputs of heimspiel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

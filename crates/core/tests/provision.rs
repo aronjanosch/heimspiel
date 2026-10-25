@@ -251,3 +251,52 @@ fn keeps_the_users_other_launcher_settings() {
     assert_eq!(settings["fullscreen"], true);
     assert_eq!(settings["check_updates"], false);
 }
+
+#[test]
+fn tells_a_libultraship_port_its_data_folder() {
+    // Like 2 Ship 2 Harkinian: writes mm.o2r into $SHIP_HOME, without it into its working folder.
+    let tmp = tempfile::tempdir().unwrap();
+    let homes = homes(&tmp.path().join("config"));
+    let archive = homes.data.join("soh/oot.o2r");
+    let exe = tmp.path().join("2ship.appimage");
+    fs::write(
+        &exe,
+        "#!/bin/sh\n[ -n \"$SHIP_HOME\" ] || exit 1\ncp \"$1\" \"$SHIP_HOME/oot.o2r\"\nexec sleep 600\n",
+    )
+    .unwrap();
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+    let original = rom(&tmp, &Z64);
+
+    provision::provide(&o2r(), &homes, Some(Command::new(&exe)), || {
+        Ok(original.clone())
+    })
+    .unwrap();
+
+    assert_eq!(fs::read(&archive).unwrap(), Z64);
+}
+
+#[test]
+fn stops_a_port_that_ignores_sigterm() {
+    let tmp = tempfile::tempdir().unwrap();
+    let homes = homes(&tmp.path().join("config"));
+    let archive = homes.data.join("soh/oot.o2r");
+    let exe = tmp.path().join("stubborn.appimage");
+    fs::write(
+        &exe,
+        format!(
+            "#!/bin/sh\ntrap '' TERM\nmkdir -p \"$(dirname '{a}')\"\ncp \"$1\" '{a}'\nwhile :; do sleep 1; done\n",
+            a = archive.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+    let original = rom(&tmp, &Z64);
+    let started = Instant::now();
+
+    provision::provide(&o2r(), &homes, Some(Command::new(&exe)), || {
+        Ok(original.clone())
+    })
+    .unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(20));
+}

@@ -193,6 +193,12 @@ fn prepare(
             )?;
             Ok(wrap(&command, ctx.wrapper))
         }
-        None => Ok(wrap(&ctx.quiver.run_command(app), ctx.wrapper)),
+        None => {
+            let mut command = ctx.quiver.run_command(app);
+            if let Some(home) = provision::ship_home(&manifest.provide, ctx.homes) {
+                command.env("SHIP_HOME", home);
+            }
+            Ok(wrap(&command, ctx.wrapper))
+        }
     }
 }

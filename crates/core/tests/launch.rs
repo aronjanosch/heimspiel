@@ -81,7 +81,7 @@ fn fake_quiver(dir: &Path, installs: Installs) {
     };
     let script = format!(
         "#!/bin/sh\nhere=$(dirname \"$0\")\necho \"$@\" >> \"$here/calls.log\"\n\
-         case \"$1\" in\n  --download) {install}; exec sleep 600;;\n  --run) [ -f \"$here/hangs\" ] && exec sleep 600; exit 0;;\nesac\n"
+         case \"$1\" in\n  --download) {install}; exec sleep 600;;\n  --run) echo \"$SHIP_HOME\" > \"$here/ship_home\"; [ -f \"$here/hangs\" ] && exec sleep 600; exit 0;;\nesac\n"
     );
     fs::create_dir_all(dir).unwrap();
     let path = dir.join("QuiverLauncher-linux-x64.AppImage");
@@ -356,6 +356,13 @@ fn extracts_an_o2r_original_with_the_program_quiver_installed() {
 
     assert_eq!(fs::read(&archive).unwrap(), Z64);
     assert_eq!(calls(&s), ["--download TestShip", "--run TestShip"]);
+    // libultraship Ports keep their data where heimspiel put the archive, not in Quiver's folder.
+    assert_eq!(
+        fs::read_to_string(s.quiver_dir.join("ship_home"))
+            .unwrap()
+            .trim(),
+        archive.parent().unwrap().to_string_lossy()
+    );
 }
 
 #[test]

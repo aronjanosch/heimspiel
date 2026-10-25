@@ -138,6 +138,7 @@ fn extract(mut port: Command, rom: &Path, archive: &Path) -> anyhow::Result<()> 
     let program = port.get_program().to_string_lossy().into_owned();
     let mut child = port
         .arg(rom)
+        .env("SHIP_HOME", archive.parent().unwrap())
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
@@ -188,6 +189,17 @@ fn write_atomically(target: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let tmp = target.with_extension("part");
     fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
     fs::rename(&tmp, target).with_context(|| format!("replacing {}", target.display()))
+}
+
+/// The data folder a libultraship Port (Ship of Harkinian, 2 Ship 2 Harkinian) is told through
+/// `SHIP_HOME`: the folder of its archive. Without it, a Port whose AppImage does not set it (2S2H)
+/// keeps its archive, settings and saves in the folder it was started in, which under Quiver is the
+/// app folder.
+pub fn ship_home(spec: &Provide, homes: &Homes) -> Option<PathBuf> {
+    match spec {
+        Provide::O2r { archive, .. } => homes.data.join(archive).parent().map(Path::to_path_buf),
+        _ => None,
+    }
 }
 
 /// Brings an N64 ROM into big-endian (z64) order, detected from its header rather than its name:

@@ -318,3 +318,21 @@ fn fills_a_folder_that_is_started_as_a_whole() {
     run(&s, &server, &escaped(&game), u64::MAX).unwrap();
     assert_eq!(server.requests().len(), requests);
 }
+
+#[test]
+fn gives_games_the_cache_dropped_their_placeholders_back() {
+    let s = setup();
+    let server = server();
+    let dropped = s.tmp.path().join("ROMs/psx/Dropped.chd");
+    fs::create_dir_all(dropped.parent().unwrap()).unwrap();
+    symlink(s.cache.path(77, "Dropped.chd"), &dropped).unwrap();
+    let game = s.roms.join("Lode Runner 3-D (USA).n64");
+
+    run(&s, &server, &escaped(&game), u64::MAX).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&dropped).unwrap(),
+        "heimspiel-placeholder romm:77\n"
+    );
+    assert!(!s.tmp.path().join("cache/77").exists());
+}

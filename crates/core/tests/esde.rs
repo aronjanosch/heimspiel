@@ -333,6 +333,11 @@ fn keeps_a_link_to_a_fetched_game_and_removes_it_with_the_game() {
     esde.write(&lode()).unwrap();
     assert_eq!(fs::read(&game).unwrap(), b"rom");
 
+    // The cache dropped the game; ES-DE would skip the dangling link.
+    fs::remove_file(&cached).unwrap();
+    esde.write(&lode()).unwrap();
+    assert_eq!(read(&game), "heimspiel-placeholder romm:3039\n");
+
     esde.write(&library(vec![])).unwrap();
     assert!(fs::symlink_metadata(&game).is_err());
 }

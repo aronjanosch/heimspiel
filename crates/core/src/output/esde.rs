@@ -155,7 +155,7 @@ impl EsDe {
                     };
                     let content = match location {
                         FileLocation::RomM { rom_id, layout } => {
-                            let placeholder = format!("{PLACEHOLDER}romm:{rom_id}\n");
+                            let placeholder = placeholder(*rom_id);
                             match layout {
                                 Layout::File => Content::File(placeholder),
                                 Layout::StartInFolder => Content::Folder {
@@ -188,7 +188,8 @@ impl EsDe {
             let cache: Vec<&Path> = self.game_cache.iter().map(PathBuf::as_path).collect();
             match content {
                 // A fetched game stays linked; the hook made that link from this Placeholder.
-                Content::File(_) if is_link_into(&path, &cache) => {}
+                // ES-DE skips a link the cache left dangling, so that gets its Placeholder back.
+                Content::File(_) if is_link_into(&path, &cache) && path.exists() => {}
                 Content::File(text) => {
                     clear_other_kind(&path, false)?;
                     write_if_changed(&path, text.as_bytes())?;
@@ -341,6 +342,11 @@ const MARKER: &str = "X-Heimspiel-Id=";
 
 /// First line of every Placeholder heimspiel writes.
 pub(crate) const PLACEHOLDER: &str = "heimspiel-placeholder ";
+
+/// The Placeholder of a RomM game.
+pub(crate) fn placeholder(rom_id: u64) -> String {
+    format!("{PLACEHOLDER}romm:{rom_id}\n")
+}
 
 /// Hidden file in the folders heimspiel writes for games made of several files, holding the
 /// game's Placeholder text. ES-DE skips hidden files.

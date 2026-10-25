@@ -14,7 +14,7 @@ use anyhow::{Context, bail};
 use crate::cache::GameCache;
 use crate::fetch::Fetch;
 use crate::library::Layout;
-use crate::output::esde::{FOLDER_MARKER, PLACEHOLDER};
+use crate::output::esde::{FOLDER_MARKER, PLACEHOLDER, placeholder};
 
 pub fn game_start(fetch: &Fetch, args: &[String]) -> anyhow::Result<()> {
     let Some(first) = args.first() else {
@@ -28,8 +28,27 @@ pub fn game_start(fetch: &Fetch, args: &[String]) -> anyhow::Result<()> {
     }
     let start = fetch.game(game.rom_id)?;
     game.link(&start)?;
+    if let Some(roms) = game.roms_dir() {
+        restore_placeholders(roms, fetch.cache);
+    }
     fetch.progress.finish();
     Ok(())
+}
+
+/// Puts the Placeholders back for games the cache dropped to make room: ES-DE skips links that
+/// point nowhere when it starts. Games of several files keep their folder and need nothing.
+fn restore_placeholders(roms: &Path, cache: &GameCache) {
+    let systems = fs::read_dir(roms).into_iter().flatten().flatten();
+    for item in systems.flat_map(|s| fs::read_dir(s.path()).into_iter().flatten().flatten()) {
+        let path = item.path();
+        if let Ok(target) = fs::read_link(&path)
+            && !path.exists()
+            && let Some(rom_id) = cache.rom_id_of(&target)
+        {
+            let tmp = path.with_extension("heimspiel-tmp");
+            let _ = fs::write(&tmp, placeholder(rom_id)).and_then(|()| fs::rename(&tmp, &path));
+        }
+    }
 }
 
 /// One of heimspiel's RomM games in an ES-DE ROM folder, at the path ES-DE passes: a file, the
@@ -57,6 +76,15 @@ impl Placed {
             path: path.to_path_buf(),
             layout,
         })
+    }
+
+    /// ES-DE's ROM folder, holding one folder per system.
+    fn roms_dir(&self) -> Option<&Path> {
+        let system = match self.layout {
+            Layout::File | Layout::Folder => self.path.parent()?,
+            Layout::StartInFolder => self.path.parent()?.parent()?,
+        };
+        system.parent()
     }
 
     /// Whether the game is linked to its files in the cache; marks it as played if so.

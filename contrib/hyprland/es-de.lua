@@ -4,7 +4,8 @@
 -- and Hyprland does not hand it back when the game exits, so ES-DE comes back tiled. This file
 -- makes ES-DE fullscreen again once every window that opened on its workspace after it has
 -- closed, and floats windows that open there without fullscreen, centred, instead of tiling them
--- next to the black ES-DE.
+-- next to the black ES-DE. (With misc:on_focus_under_fullscreen = 1, as Omarchy sets it, a window
+-- opening above fullscreen ES-DE takes over its fullscreen instead.)
 --
 -- Load it at the end of ~/.config/hypr/hyprland.lua:
 --   dofile("/path/to/heimspiel/contrib/hyprland/es-de.lua")
@@ -40,7 +41,8 @@ hl.on("window.open", function(w)
   end
 end)
 
-hl.on("window.destroy", function(w)
+-- window.close, not window.destroy: the window passed to the latter has no fields left.
+hl.on("window.close", function(w)
   if not launched[w.address] then
     return
   end

@@ -59,7 +59,9 @@ the RomM 5.4.1 server's `/openapi.json`, and tests against the user's RomM serve
   not exist, skipping entry`), so a game the cache dropped vanished from ES-DE. heimspiel now puts its
   Placeholder back: the hook after every download, `sync` on every run. Folders of games of several
   files stay, and ES-DE passes their inner link even when it dangles (`FileData.cpp:1071-1072` accepts
-  any symlink).
+  any symlink). Checked live: after `sync` the dropped Tekken 3 and Twisted Metal 2 were Placeholders again;
+  Metal Slug 6, dropped while Tekken 3 was fetched, kept its folder of dangling links, a restarted ES-DE
+  logged nothing for it, and the hook on its inner link fetched all five files again.
 
 ## Loading window on Hyprland 0.56.2 (Omarchy, NVIDIA)
 
@@ -70,6 +72,15 @@ the RomM 5.4.1 server's `/openapi.json`, and tests against the user's RomM serve
   came up above ES-DE, ES-DE lost fullscreen meanwhile (`fullscreen = 0`; Omarchy sets
   `misc:on_focus_under_fullscreen = 1`), the fake emulator then received the downloaded game, and ES-DE was
   fullscreen again afterwards through the user's handler.
-- Not tested: KDE Plasma and GNOME, whether a controller button dismisses a failure (WebKitGTK's
-  gamepad support depends on its build), and `contrib/hyprland/es-de.lua` itself, which replaces the
-  handler's "ES-DE alone on its workspace" with "every window opened on its workspace since has closed".
+- First install of a Port (Bomberman 64: Recompiled, fresh `XDG_DATA_HOME`, started on ES-DE's workspace):
+  the window showed "Installing" for 8 s, closed, and the Port opened fullscreen about 2 s later; ES-DE
+  shows through in between. When Quiver did not install, the failure stayed up for its 20 s and closed.
+- `contrib/hyprland/es-de.lua` (tested with `foot` windows on ES-DE's workspace):
+  - `window.destroy` hands Lua a window whose fields are all `nil`, so the snippet forgets windows on
+    `window.close`, which still carries them.
+  - With `misc:on_focus_under_fullscreen = 1` a window opening above fullscreen ES-DE is fullscreen by
+    the time `window.open` fires; only above a tiled ES-DE is a windowed one floated and centred.
+  - ES-DE became fullscreen again after one window, after a launcher followed by a game (not after the
+    launcher alone), and after the loading window and the Port above.
+- Not tested: KDE Plasma and GNOME, and whether a controller button dismisses a failure (WebKitGTK's
+  gamepad support depends on its build).

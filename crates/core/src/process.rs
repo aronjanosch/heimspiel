@@ -1,7 +1,7 @@
 //! Child processes started in a process group of their own, so they can be stopped together with
 //! everything they started.
 
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,6 +12,7 @@ pub(crate) fn stop(child: &mut Child) {
     let signal = |name: &str| {
         Command::new("kill")
             .args([name, "--", &group])
+            .stderr(Stdio::null())
             .status()
             .is_ok_and(|s| s.success())
     };
@@ -21,7 +22,7 @@ pub(crate) fn stop(child: &mut Child) {
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(5) {
         if child.try_wait().ok().flatten().is_some() {
-            // The child is gone; the rest of its group may still ignore SIGTERM.
+            // The child is gone; the rest of its group, if any is left, may still ignore SIGTERM.
             signal("-KILL");
             return;
         }

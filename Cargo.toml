@@ -12,6 +12,7 @@ repository = "https://github.com/aronjanosch/heimspiel"
 [workspace.dependencies]
 heimspiel-core = { path = "crates/core" }
 anyhow = "1"
+base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 tauri = "2"
 tauri-build = "2"

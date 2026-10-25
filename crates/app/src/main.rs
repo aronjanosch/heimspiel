@@ -1,6 +1,21 @@
+mod progress;
+
+use tauri::{WebviewUrl, WebviewWindowBuilder};
+
 fn main() {
     work_around_nvidia_wayland();
+    if std::env::args().nth(1).as_deref() == Some("progress") {
+        progress::run();
+        return;
+    }
     tauri::Builder::default()
+        .setup(|app| {
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("heimspiel")
+                .inner_size(900.0, 600.0)
+                .build()?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running the heimspiel app");
 }

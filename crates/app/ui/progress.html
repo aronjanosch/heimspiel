@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>heimspiel</title>
+    <style>
+      :root {
+        --bg: #0d0f14;
+        --text: #f2f3f5;
+        --muted: #9aa1ad;
+        --track: #262a33;
+        --bar: #5b8cff;
+        --error: #ff8a80;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, sans-serif;
+        cursor: none;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        display: flex;
+        align-items: center;
+        gap: 6vh;
+        width: min(80vw, 150vh);
+      }
+      #cover {
+        max-height: 50vh;
+        max-width: 35vw;
+        border-radius: 1vh;
+        box-shadow: 0 2vh 6vh rgb(0 0 0 / 0.6);
+      }
+      #cover:not([src]) { display: none; }
+      section { flex: 1; min-width: 0; }
+      #action { color: var(--muted); font-size: 2.8vh; margin: 0 0 1vh; }
+      #game { font-size: 5.5vh; font-weight: 600; margin: 0 0 4vh; }
+      #game:empty { display: none; }
+      #track {
+        height: 1.2vh;
+        border-radius: 0.6vh;
+        background: var(--track);
+        overflow: hidden;
+      }
+      #bar {
+        height: 100%;
+        width: 0;
+        background: var(--bar);
+        transition: width 0.2s linear;
+      }
+      /* Without a size the step can only say that it is busy. */
+      #track.busy #bar {
+        width: 30%;
+        animation: busy 1.6s ease-in-out infinite;
+      }
+      @keyframes busy {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(340%); }
+      }
+      #amount { color: var(--muted); font-size: 2.4vh; margin: 1.5vh 0 0; min-height: 3vh; }
+      #message { color: var(--error); font-size: 2.6vh; white-space: pre-wrap; margin: 0 0 3vh; }
+      #hint { color: var(--muted); font-size: 2.2vh; margin: 0; }
+      .failed #track, .failed #amount, #message, #hint { display: none; }
+      .failed #message, .failed #hint { display: block; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img id="cover" alt="">
+      <section>
+        <p id="action"></p>
+        <h1 id="game"></h1>
+        <div id="track" class="busy"><div id="bar"></div></div>
+        <p id="amount"></p>
+        <p id="message"></p>
+        <p id="hint"></p>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const CLOSE_AFTER_SECONDS = 20;
+
+      function size(bytes) {
+        const gb = bytes / 2 ** 30;
+        return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.ceil(bytes / 2 ** 20)} MB`;
+      }
+
+      // Called by heimspiel-app with one message of heimspiel_core::progress::Message.
+      function show(message) {
+        switch (message.type) {
+          case "start":
+            $("action").textContent = message.action;
+            $("game").textContent = message.game;
+            if (message.cover) $("cover").src = message.cover;
+            else $("cover").removeAttribute("src");
+            $("track").classList.add("busy");
+            $("bar").style.width = "";
+            $("amount").textContent = "";
+            break;
+          case "advance":
+            $("track").classList.remove("busy");
+            $("bar").style.width = `${(100 * message.done_bytes) / message.total_bytes}%`;
+            $("amount").textContent = `${size(message.done_bytes)} of ${size(message.total_bytes)}`;
+            break;
+          case "fail":
+            fail(message.message);
+            break;
+        }
+      }
+
+      function fail(text) {
+        document.body.classList.add("failed");
+        $("action").textContent = "Could not start";
+        $("message").textContent = text;
+        let left = CLOSE_AFTER_SECONDS;
+        const hint = () => ($("hint").textContent = `Press any button to go back (${left})`);
+        hint();
+        setInterval(() => (--left <= 0 ? close() : hint()), 1000);
+        // The button that started the game may still be held.
+        setTimeout(() => {
+          addEventListener("keydown", close);
+          addEventListener("mousedown", close);
+          watchGamepads();
+        }, 1000);
+      }
+
+      function close() {
+        location.href = "heimspiel://close";
+      }
+
+      // Any button on any controller dismisses, where the browser engine supports gamepads.
+      function watchGamepads() {
+        if (!navigator.getGamepads) return;
+        const poll = () => {
+          const pressed = [...navigator.getGamepads()].some(
+            (pad) => pad && pad.buttons.some((button) => button.pressed),
+          );
+          pressed ? close() : requestAnimationFrame(poll);
+        };
+        poll();
+      }
+    </script>
+  </body>
+</html>

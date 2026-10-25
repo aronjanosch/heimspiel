@@ -12,7 +12,7 @@ use heimspiel_core::fetch::Fetch;
 use heimspiel_core::hook;
 use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
 use heimspiel_core::port::{self, Manifest};
-use heimspiel_core::progress::Progress;
+use heimspiel_core::progress::{Progress, Window};
 use heimspiel_core::proton;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::{self, Quiver};
@@ -346,9 +346,23 @@ fn fetch<'a>(
     }
 }
 
-/// Shows long steps as desktop notifications.
+/// The loading window of `heimspiel-app`, from next to this binary or from `PATH`; desktop
+/// notifications without it.
 fn progress() -> Box<dyn Progress> {
-    Box::new(Notifications)
+    let beside = env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("heimspiel-app")));
+    let on_path = env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|dir| dir.join("heimspiel-app"));
+    match beside.into_iter().chain(on_path).find(|app| app.is_file()) {
+        Some(app) => Box::new(Window::new(vec![
+            app.to_string_lossy().into_owned(),
+            "progress".into(),
+        ])),
+        None => Box::new(Notifications),
+    }
 }
 
 struct Notifications;

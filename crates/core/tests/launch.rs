@@ -135,7 +135,7 @@ fn launch_with(
     game: Option<&str>,
     install_timeout: Duration,
 ) -> anyhow::Result<()> {
-    with_ctx(s, server, manifest, install_timeout, |ctx| {
+    with_ctx(s, server, manifest, install_timeout, &[], |ctx| {
         launch::run(ctx, &manifest.id, original, game)
     })
 }
@@ -145,6 +145,7 @@ fn with_ctx<T>(
     server: &FakeServer,
     manifest: &Manifest,
     install_timeout: Duration,
+    wrapper: &[String],
     f: impl FnOnce(&PortLaunch) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let client = Romm::new(&server.url, "rmm_secret").backoff(Duration::ZERO);
@@ -182,6 +183,7 @@ fn with_ctx<T>(
         notify: &|_| {},
         homes: &homes,
         install_timeout,
+        wrapper,
         latest_version: &|_| Ok("1.0".into()),
     };
     f(&ctx)
@@ -298,8 +300,8 @@ fn keeps_the_other_apps_in_quivers_library() {
     );
 }
 
-#[test]
-fn extracts_an_o2r_original_with_the_program_quiver_installed() {
+/// Sets up a Port of kind o2r like Ship of Harkinian and launches it inside `wrapper`.
+fn launch_o2r_port(wrapper: &[String]) -> (Setup, PathBuf) {
     use sha1::{Digest, Sha1};
     let s = setup(Installs::Always);
     let archive = s.tmp.path().join("data/test/test.o2r");
@@ -336,10 +338,48 @@ sha1 = ["{:x}"]
     .unwrap();
     let server = romm();
 
-    run_port(&s, &server, &manifest, Duration::from_secs(20)).unwrap();
+    with_ctx(
+        &s,
+        &server,
+        &manifest,
+        Duration::from_secs(20),
+        wrapper,
+        |ctx| launch::run(ctx, &manifest.id, &OriginalLocation::RomM(7), None),
+    )
+    .unwrap();
+    (s, archive)
+}
+
+#[test]
+fn extracts_an_o2r_original_with_the_program_quiver_installed() {
+    let (s, archive) = launch_o2r_port(&[]);
 
     assert_eq!(fs::read(&archive).unwrap(), Z64);
     assert_eq!(calls(&s), ["--download TestShip", "--run TestShip"]);
+}
+
+#[test]
+fn runs_the_extraction_inside_the_wrapper_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wrapped = tmp.path().join("wrapped.log");
+    let wrapper = [
+        "sh".to_owned(),
+        "-c".to_owned(),
+        format!(
+            "echo \"$(basename \"$0\") $1\" >> '{}'; exec \"$0\" \"$@\"",
+            wrapped.display()
+        ),
+    ];
+
+    let (_s, archive) = launch_o2r_port(&wrapper);
+
+    assert_eq!(fs::read(&archive).unwrap(), Z64);
+    let log = fs::read_to_string(&wrapped).unwrap();
+    let programs: Vec<&str> = log.lines().map(|l| l.split(' ').next().unwrap()).collect();
+    assert_eq!(
+        programs,
+        ["port.appimage", "QuiverLauncher-linux-x64.AppImage"]
+    );
 }
 
 fn collection() -> Manifest {
@@ -450,17 +490,23 @@ fn check(s: &Setup, server: &FakeServer, seconds: u64) -> anyhow::Result<()> {
     let manifest = manifest();
     let log = s.tmp.path().join("check.log");
     // `env` stands in for gamescope: it runs the command it is given.
-    with_ctx(s, server, &manifest, Duration::from_secs(20), |ctx| {
-        launch::check(
-            ctx,
-            &manifest.id,
-            &OriginalLocation::RomM(7),
-            None,
-            &["env".to_owned()],
-            Duration::from_secs(seconds),
-            &log,
-        )
-    })
+    with_ctx(
+        s,
+        server,
+        &manifest,
+        Duration::from_secs(20),
+        &["env".to_owned()],
+        |ctx| {
+            launch::check(
+                ctx,
+                &manifest.id,
+                &OriginalLocation::RomM(7),
+                None,
+                Duration::from_secs(seconds),
+                &log,
+            )
+        },
+    )
 }
 
 #[test]

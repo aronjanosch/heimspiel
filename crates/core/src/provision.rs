@@ -23,12 +23,13 @@ pub struct Homes {
     pub data: PathBuf,
 }
 
-/// Provisions the Original for `spec`. `port_exe` is the installed Port, needed by kinds that let
-/// the Port do the work. `fetch_original` is only called when the Port has no valid copy yet.
+/// Provisions the Original for `spec`. `port` is the command that runs the installed Port, needed
+/// by kinds that let the Port do the work. `fetch_original` is only called when the Port has no
+/// valid copy yet.
 pub fn provide(
     spec: &Provide,
     homes: &Homes,
-    port_exe: Option<&Path>,
+    port: Option<Command>,
     fetch_original: impl FnOnce() -> anyhow::Result<PathBuf>,
 ) -> anyhow::Result<()> {
     match spec {
@@ -65,11 +66,11 @@ pub fn provide(
                     original.display()
                 );
             }
-            let exe = port_exe.context("the Port is not installed")?;
+            let port = port.context("the Port is not installed")?;
             let dir = archive.parent().unwrap();
             let rom_file = dir.join("heimspiel-original.z64");
             write_atomically(&rom_file, &rom)?;
-            let result = extract(exe, &rom_file, &archive);
+            let result = extract(port, &rom_file, &archive);
             let _ = fs::remove_file(&rom_file);
             result
         }
@@ -131,17 +132,18 @@ fn read_rom(
 
 /// Runs the Port with the ROM until it has written `archive`, then stops it: it would otherwise
 /// wait at its "Run?" question.
-fn extract(exe: &Path, rom: &Path, archive: &Path) -> anyhow::Result<()> {
+fn extract(mut port: Command, rom: &Path, archive: &Path) -> anyhow::Result<()> {
     let log_path = archive.with_file_name("heimspiel-extract.log");
     let log = fs::File::create(&log_path)?;
-    let mut child = Command::new(exe)
+    let program = port.get_program().to_string_lossy().into_owned();
+    let mut child = port
         .arg(rom)
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
         .process_group(0)
         .spawn()
-        .with_context(|| format!("starting {}", exe.display()))?;
+        .with_context(|| format!("starting {program}"))?;
     let started = Instant::now();
     let mut last_size = None;
     let mut stable_since = Instant::now();
@@ -163,7 +165,7 @@ fn extract(exe: &Path, rom: &Path, archive: &Path) -> anyhow::Result<()> {
             }
             bail!(
                 "{} ended without writing {}; see {}",
-                exe.display(),
+                program,
                 archive.display(),
                 log_path.display()
             );
@@ -172,7 +174,7 @@ fn extract(exe: &Path, rom: &Path, archive: &Path) -> anyhow::Result<()> {
             stop(&mut child);
             bail!(
                 "{} did not write {} within 10 minutes",
-                exe.display(),
+                program,
                 archive.display()
             );
         }

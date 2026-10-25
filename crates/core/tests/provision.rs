@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use heimspiel_core::port::Provide;
@@ -145,7 +146,10 @@ fn extracts_the_original_once_with_the_port_and_stops_it() {
     let original = rom(&tmp, &V64);
     let started = Instant::now();
 
-    provision::provide(&o2r(), &homes, Some(&exe), || Ok(original.clone())).unwrap();
+    provision::provide(&o2r(), &homes, Some(Command::new(&exe)), || {
+        Ok(original.clone())
+    })
+    .unwrap();
 
     assert!(started.elapsed() < Duration::from_secs(10));
     // The Port got the verified ROM in big-endian order.
@@ -160,7 +164,10 @@ fn does_not_run_the_port_for_an_unknown_release() {
     let exe = fake_port(tmp.path(), &archive);
     let original = rom(&tmp, &[0x80, 0x37, 0x12, 0x40, 9, 9, 9, 9]);
 
-    let err = provision::provide(&o2r(), &homes, Some(&exe), || Ok(original.clone())).unwrap_err();
+    let err = provision::provide(&o2r(), &homes, Some(Command::new(&exe)), || {
+        Ok(original.clone())
+    })
+    .unwrap_err();
 
     assert!(format!("{err:#}").contains("does not match"), "{err:#}");
     assert!(!archive.exists());

@@ -191,7 +191,7 @@ fn main() -> anyhow::Result<()> {
                 (None, Some(dump)) => OriginalLocation::Dump(std::path::absolute(dump)?),
                 (None, None) => unreachable!("clap requires one"),
             };
-            let result = with_port_launch(&config, &env, |ctx| {
+            let result = with_port_launch(&config, &env, &[], |ctx| {
                 launch::run(ctx, &port, &original, game.as_deref())
             });
             // ES-DE shows nothing when a launch fails.
@@ -225,13 +225,12 @@ fn main() -> anyhow::Result<()> {
             ]
             .map(String::from)
             .into();
-            with_port_launch(&config, &env, |ctx| {
+            with_port_launch(&config, &env, &wrapper, |ctx| {
                 launch::check(
                     ctx,
                     &port,
                     &original,
                     game,
-                    &wrapper,
                     Duration::from_secs(seconds),
                     &log,
                 )
@@ -259,6 +258,7 @@ fn main() -> anyhow::Result<()> {
 fn with_port_launch(
     config: &Config,
     env: &Env,
+    wrapper: &[String],
     f: impl FnOnce(&PortLaunch) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let romm = match &config.romm {
@@ -285,6 +285,7 @@ fn with_port_launch(
         notify: &notify,
         homes: &homes,
         install_timeout: Duration::from_secs(30 * 60),
+        wrapper,
         latest_version: &|app| quiver::latest_tag(&app.repository),
     };
     quiver.ensure_installed()?;

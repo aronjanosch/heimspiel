@@ -31,6 +31,9 @@ pub struct PortLaunch<'a> {
     pub notify: &'a dyn Fn(&str),
     pub homes: &'a Homes,
     pub install_timeout: Duration,
+    /// A command line every program heimspiel starts for the Port runs inside, such as a
+    /// headless gamescope; empty to run them directly.
+    pub wrapper: &'a [String],
     /// The newest release tag of a Port's repository; heimspiel pins it in Quiver before
     /// installing.
     pub latest_version: &'a dyn Fn(&QuiverApp) -> anyhow::Result<String>,
@@ -62,29 +65,27 @@ pub fn run(
     Ok(())
 }
 
-/// Installs and provisions like [`run`], then runs the Port inside `wrapper` (a command line that
-/// takes the Port's command after it) and checks that it is still running after `duration`; then
-/// stops it. The output goes to `log`. Sound through SDL is muted.
+/// Installs and provisions like [`run`], then runs the Port (inside `ctx.wrapper`, such as a
+/// headless gamescope) and checks that it is still running after `duration`; then stops it. The
+/// output goes to `log`. Sound through SDL is muted.
 pub fn check(
     ctx: &PortLaunch,
     port_id: &str,
     original: &OriginalLocation,
     game: Option<&str>,
-    wrapper: &[String],
     duration: Duration,
     log: &Path,
 ) -> anyhow::Result<()> {
-    let command = prepare(ctx, port_id, original, game)?;
-    let mut wrapped = wrap(&command, wrapper);
+    let mut command = prepare(ctx, port_id, original, game)?;
     let output = fs::File::create(log).with_context(|| format!("creating {}", log.display()))?;
-    let mut child = wrapped
+    let mut child = command
         .env("SDL_AUDIODRIVER", "dummy")
         .stdin(Stdio::null())
         .stdout(output.try_clone()?)
         .stderr(output)
         .process_group(0)
         .spawn()
-        .with_context(|| format!("starting {}", wrapper.join(" ")))?;
+        .with_context(|| format!("starting {port_id}"))?;
     let started = Instant::now();
     while started.elapsed() < duration {
         if let Some(status) = child.try_wait()? {
@@ -165,10 +166,11 @@ fn prepare(
             let fetch = ctx
                 .fetch
                 .context("this Port's Original is in RomM; set up [romm]")?;
-            let exe = ctx.quiver.executable(app);
-            provision::provide(&manifest.provide, ctx.homes, exe.as_deref(), || {
-                fetch.game(*rom_id)
-            })?;
+            let port = ctx
+                .quiver
+                .executable(app)
+                .map(|exe| wrap(&Command::new(exe), ctx.wrapper));
+            provision::provide(&manifest.provide, ctx.homes, port, || fetch.game(*rom_id))?;
         }
         OriginalLocation::Dump(path) => {
             provision::provide_dump(&manifest.provide, &ctx.quiver.prefix(app), path, game)?;
@@ -184,12 +186,13 @@ fn prepare(
                 .as_deref()
                 .context("the Manifest names no program to start")?;
             let program = ctx.quiver.app_dir(app).join(executable);
-            proton.command(
+            let command = proton.command(
                 &program,
                 &ctx.quiver.prefix(app),
                 &format!("heimspiel-{}", app.name),
-            )
+            )?;
+            Ok(wrap(&command, ctx.wrapper))
         }
-        None => Ok(ctx.quiver.run_command(app)),
+        None => Ok(wrap(&ctx.quiver.run_command(app), ctx.wrapper)),
     }
 }

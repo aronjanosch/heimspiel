@@ -1,0 +1,26 @@
+# 2 Ship 2 Harkinian, a native port of Majora's Mask from the HarbourMasters family. Like Ship of
+# Harkinian it extracts a ROM given as argument into ~/.local/share/2ship/mm.o2r (mm/2s2h/BenPort.cpp,
+# appShortName "2ship", ES_EXTRACT_ARGS). Unlike SoH it asks nothing afterwards and goes on into the
+# game; heimspiel stops it once the archive is there. It logs no "Done!" like SoH, but the archive
+# appears complete: libzip writes it on zip_close through a temporary file and a rename
+# (OTRExporter/ExporterArchiveO2R.cpp).
+# Accepted N64 release: docs/supportedHashes.json (5.0.1), SHA-1 of the big-endian ROM.
+id = "2s2h"
+title = "2 Ship 2 Harkinian"
+
+[quiver]
+name = "2Ship2Harkinian"
+repository = "2ship2harkinian/2ship2harkinian"
+asset-filter = "Linux.zip"
+
+[original]
+platform = "n64"
+igdb-id = 1030
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "o2r"
+archive = "2ship/mm.o2r"
+sha1 = [
+    "d6133ace5afaa0882cf214cf88daba39e266c078", # NTSC-U 1.0
+]

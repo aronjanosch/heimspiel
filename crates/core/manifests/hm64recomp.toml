@@ -1,0 +1,22 @@
+# Harvest Moon 64: Recompiled (HarvestMoon64Recomp/HarvestMoon64Recomp, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp (v1.2.2): program_id "HarvestMoon64Recompiled", game_id
+# "harvest_moon_64", rom_hash 0x68b2c3755c527305 (USA); matches the USA ROM in RomM after conversion
+# to big-endian.
+id = "hm64recomp"
+title = "Harvest Moon 64: Recompiled"
+
+[quiver]
+name = "HarvestMoon64Recompiled"
+repository = "HarvestMoon64Recomp/HarvestMoon64Recomp"
+asset-filter = "Linux-X64.zip"
+
+[original]
+platform = "n64"
+igdb-id = 3378
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "HarvestMoon64Recompiled"
+game-id = "harvest_moon_64"
+xxh3 = "0x68B2C3755C527305"

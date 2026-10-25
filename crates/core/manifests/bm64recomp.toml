@@ -1,0 +1,22 @@
+# Bomberman 64: Recompiled (RevoSucks/BM64Recomp, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp (v1.0.0): program_id "BM64Recompiled", game_id "bm64_us",
+# rom_hash 0xc4c0b74bbb696426 (USA); matches the USA ROM in RomM after conversion to big-endian.
+# RomM files Bomberman 64 (USA) under IGDB 80368.
+id = "bm64recomp"
+title = "Bomberman 64: Recompiled"
+
+[quiver]
+name = "BM64Recompiled"
+repository = "RevoSucks/BM64Recomp"
+asset-filter = "BM64Recompiled-Linux-X64-Release.zip"
+
+[original]
+platform = "n64"
+igdb-id = 80368
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "BM64Recompiled"
+game-id = "bm64_us"
+xxh3 = "0xC4C0B74BBB696426"

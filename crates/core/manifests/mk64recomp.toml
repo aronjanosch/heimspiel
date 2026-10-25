@@ -1,0 +1,22 @@
+# Mario Kart 64: Recompiled (sonicdcer/MarioKart64Recomp, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp and src/game/config.cpp (v0.9.2): program_id
+# "MarioKart64Recompiled", game_id "mk64.us", rom_hash 0x54572403569b87c1 (USA retail); matches the USA
+# ROM in RomM after conversion to big-endian.
+id = "mk64recomp"
+title = "Mario Kart 64: Recompiled"
+
+[quiver]
+name = "MarioKart64Recompiled"
+repository = "sonicdcer/MarioKart64Recomp"
+asset-filter = "Linux-X64-Release.zip"
+
+[original]
+platform = "n64"
+igdb-id = 2342
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "MarioKart64Recompiled"
+game-id = "mk64.us"
+xxh3 = "0x54572403569B87C1"

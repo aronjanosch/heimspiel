@@ -1,0 +1,21 @@
+# DK64: Rekongpiled (Rainchus/Donkey-Kong-64-Recompiled, GPL-3.0), an N64Recomp port of Donkey Kong 64.
+# librecomp facts from src/main/main.cpp (v1.0.3): program_id "DK64Recompiled", game_id "DK64",
+# rom_hash 0x4d876060f09b3fc5 (USA); matches the USA ROM in RomM after conversion to big-endian.
+id = "dk64recomp"
+title = "Donkey Kong 64: Rekongpiled"
+
+[quiver]
+name = "DK64Recompiled"
+repository = "Rainchus/Donkey-Kong-64-Recompiled"
+asset-filter = "Linux-X64-Release"
+
+[original]
+platform = "n64"
+igdb-id = 1096
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "DK64Recompiled"
+game-id = "DK64"
+xxh3 = "0x4D876060F09B3FC5"

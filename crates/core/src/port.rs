@@ -173,7 +173,12 @@ impl Manifest {
 /// The Manifests that ship with heimspiel.
 pub fn builtin() -> Vec<Manifest> {
     const FILES: &[(&str, &str)] = &[
+        ("2s2h", include_str!("../manifests/2s2h.toml")),
         ("banjorecomp", include_str!("../manifests/banjorecomp.toml")),
+        ("bm64recomp", include_str!("../manifests/bm64recomp.toml")),
+        ("dk64recomp", include_str!("../manifests/dk64recomp.toml")),
+        ("hm64recomp", include_str!("../manifests/hm64recomp.toml")),
+        ("mk64recomp", include_str!("../manifests/mk64recomp.toml")),
         ("soh", include_str!("../manifests/soh.toml")),
         ("uncharted", include_str!("../manifests/uncharted.toml")),
         (

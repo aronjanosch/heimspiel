@@ -46,12 +46,36 @@ folders = ["~/Games/PS4"]
 ```
 
 Close ES-DE and run `heimspiel sync`. RomM games show up with metadata and covers and are downloaded
-the first time you start them, through an ES-DE event script that `sync` installs. Ports appear in
-ES-DE's `ports` system; the first start installs the port through Quiver and hands it your original.
+the first time you start them, through an ES-DE event script that `sync` installs. Games made of
+several files (a disc with its tracks, several discs, a ScummVM folder) appear as one game; a download
+cut short continues where it stopped on the next start. Ports appear in ES-DE's `ports` system; the
+first start installs the port through Quiver and hands it your original.
+
+While a download or an installation runs, ES-DE only shows black. heimspiel shows a loading window
+with the game's cover and progress instead, and the reason when a game cannot start. The window is
+`heimspiel-app progress`, found next to the `heimspiel` binary or on `PATH`; without it heimspiel falls
+back to desktop notifications.
 
 `heimspiel ports` lists the ports heimspiel sets up and what each still needs, and the other ports for
 games you own, from the [awesome-decomp-games](https://github.com/SubmitGame/awesome-decomp-games)
 catalog (`--all` includes projects without a release).
+
+## Desktop environments
+
+heimspiel never moves or focuses windows itself. Where a desktop needs help to bring ES-DE back to
+fullscreen after a game, the repository has a snippet you add yourself:
+
+- **Hyprland**: a game takes ES-DE's fullscreen slot and Hyprland does not hand it back.
+  `contrib/hyprland/es-de.lua` makes ES-DE fullscreen again once every window that opened on its
+  workspace has closed, and floats windowed games centred instead of tiling them next to ES-DE. Add
+  `dofile("/path/to/heimspiel/contrib/hyprland/es-de.lua")` at the end of `~/.config/hypr/hyprland.lua`.
+  A window that stays open on ES-DE's workspace, such as a Steam client opened there, keeps ES-DE from
+  returning to fullscreen until it closes.
+- **KDE Plasma** (untested): `contrib/kde/heimspiel-es-de` is a KWin script that does the same and
+  activates ES-DE. Install it with
+  `kpackagetool6 --type KWin/Script --install contrib/kde/heimspiel-es-de`, then enable it under
+  System Settings → Window Management → KWin Scripts.
+- **GNOME** (untested): GNOME keeps fullscreen windows fullscreen, so nothing is expected to be needed.
 
 ## Building blocks
 

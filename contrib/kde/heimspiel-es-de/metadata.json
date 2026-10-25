@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "heimspiel-es-de",
+        "Name": "heimspiel: ES-DE",
+        "Description": "Brings ES-DE back to fullscreen and focus after a game closes",
+        "License": "MIT",
+        "Version": "1.0"
+    },
+    "KPackageStructure": "KWin/Script",
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}

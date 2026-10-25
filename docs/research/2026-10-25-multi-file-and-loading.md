@@ -55,3 +55,21 @@ the RomM 5.4.1 server's `/openapi.json`, and tests against the user's RomM serve
 - Cache limit 1 GiB with Day of the Tentacle, Tekken 3, Metal Slug 6 and Twisted Metal 2 cached (1.1 GiB):
   starting Tomb Raider dropped the two least recently played games, their links dangled, and starting
   Day of the Tentacle again fetched it anew and filled its folder.
+- ES-DE skips links that point nowhere when it loads (`es_log.txt`: `File ".../Tekken 3 (USA).chd" does
+  not exist, skipping entry`), so a game the cache dropped vanished from ES-DE. heimspiel now puts its
+  Placeholder back: the hook after every download, `sync` on every run. Folders of games of several
+  files stay, and ES-DE passes their inner link even when it dangles (`FileData.cpp:1071-1072` accepts
+  any symlink).
+
+## Loading window on Hyprland 0.56.2 (Omarchy, NVIDIA)
+
+- `heimspiel-app progress` (Tauri, WebKitGTK) opens fullscreen (`fullscreen = 2`, 3840x2160) and renders the
+  cover, title and progress; it closes when its input ends. After a failure it stays and closes on a key
+  press (tested with `wtype -k Return`).
+- Launched from a fullscreen test ES-DE through the `game-start` hook (Alien Trilogy, 274 MB): the window
+  came up above ES-DE, ES-DE lost fullscreen meanwhile (`fullscreen = 0`; Omarchy sets
+  `misc:on_focus_under_fullscreen = 1`), the fake emulator then received the downloaded game, and ES-DE was
+  fullscreen again afterwards through the user's handler.
+- Not tested: KDE Plasma and GNOME, whether a controller button dismisses a failure (WebKitGTK's
+  gamepad support depends on its build), and `contrib/hyprland/es-de.lua` itself, which replaces the
+  handler's "ES-DE alone on its workspace" with "every window opened on its workspace since has closed".

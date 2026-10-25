@@ -2,6 +2,7 @@ mod common;
 
 use std::path::PathBuf;
 
+use heimspiel_core::catalog::CatalogPort;
 use heimspiel_core::dump;
 use heimspiel_core::library::{
     Entry, FileLocation, Identity, Launch, Library, Metadata, SourceKind,
@@ -175,4 +176,112 @@ fn needs_a_complete_dump_of_an_accepted_title() {
     let manifest = Manifest::parse(COLLECTION).unwrap();
 
     assert!(port::entries(&[manifest], &Library::default(), &dumps, &heimspiel()).is_empty());
+}
+
+fn catalog_port(title: &str, key: &str, platform: &str, repository: &str) -> CatalogPort {
+    CatalogPort {
+        title: title.into(),
+        game_key: key.into(),
+        platforms: vec![platform.into()],
+        kind: "decompilation".into(),
+        repository: repository.into(),
+        release: Some("1.0".into()),
+    }
+}
+
+#[test]
+fn gives_an_overview_of_the_ports_and_what_they_need() {
+    let zelda = Manifest::parse(MANIFEST).unwrap();
+    let collection = Manifest::parse(COLLECTION).unwrap();
+    let mut owned = romm(3037, 1030, "USA", None);
+    owned.title = "The Legend of Zelda: Majora's Mask".into();
+    let library = Library {
+        entries: vec![owned],
+    };
+    let catalog = [
+        // The Port heimspiel already knows.
+        catalog_port(
+            "MM (Zelda64Recomp)",
+            "thelegendofzeldamajorasmask",
+            "n64",
+            "Zelda64Recomp/Zelda64Recomp",
+        ),
+        catalog_port(
+            "MM (2 Ship 2 Harkinian)",
+            "thelegendofzeldamajorasmask",
+            "n64",
+            "2ship2harkinian/2ship2harkinian",
+        ),
+        // Same title, other Platform.
+        catalog_port(
+            "MM 3D (Restoration)",
+            "thelegendofzeldamajorasmask",
+            "3ds",
+            "leoetlino/project-restoration",
+        ),
+        catalog_port(
+            "Banjo-Kazooie",
+            "banjokazooie",
+            "n64",
+            "BanjoRecomp/BanjoRecomp",
+        ),
+    ];
+    let manifests = [zelda, collection];
+
+    let overview = port::overview(&manifests, &library, &[], &catalog, &|app| {
+        app.name == "Zelda64Recomp"
+    });
+
+    let states: Vec<_> = overview
+        .manifests
+        .iter()
+        .map(|s| (s.manifest.id.as_str(), s.original.as_deref(), s.installed))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (
+                "zelda64recomp",
+                Some("The Legend of Zelda: Majora's Mask (RomM)"),
+                true
+            ),
+            ("testcollection", None, false),
+        ]
+    );
+    let more: Vec<_> = overview
+        .more
+        .iter()
+        .map(|m| (m.port.repository.as_str(), m.original.as_str()))
+        .collect();
+    assert_eq!(
+        more,
+        [(
+            "2ship2harkinian/2ship2harkinian",
+            "The Legend of Zelda: Majora's Mask"
+        )]
+    );
+}
+
+#[test]
+fn finds_catalog_ports_for_dumps_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    common::ps4_dump(tmp.path(), "CUSA02320", &["eboot.bin", "u1data"]);
+    let dumps = dump::dumps(&[tmp.path().to_path_buf()]).unwrap();
+    let catalog = [catalog_port(
+        "Test Collection PC",
+        "testcollection",
+        "ps4",
+        "other/port",
+    )];
+    let manifests = [Manifest::parse(COLLECTION).unwrap()];
+
+    let overview = port::overview(&manifests, &Library::default(), &dumps, &catalog, &|_| {
+        false
+    });
+
+    assert_eq!(
+        overview.manifests[0].original.as_deref(),
+        Some("Test Collection™ (Dump CUSA02320)")
+    );
+    assert_eq!(overview.more[0].original, "Test Collection™");
 }

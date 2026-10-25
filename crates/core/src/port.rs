@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, bail};
 use serde::Deserialize;
 
+use crate::catalog::{self, CatalogPort};
 use crate::desktop;
 use crate::dump::Dump;
 use crate::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
@@ -263,6 +264,101 @@ pub fn entries(
         }
     }
     entries
+}
+
+/// What `heimspiel ports` shows.
+#[derive(Debug)]
+pub struct Overview<'a> {
+    /// Every Port heimspiel has a Manifest for.
+    pub manifests: Vec<ManifestState<'a>>,
+    /// Catalog Ports for games the user owns that heimspiel has no Manifest for.
+    pub more: Vec<CatalogMatch<'a>>,
+}
+
+#[derive(Debug)]
+pub struct ManifestState<'a> {
+    pub manifest: &'a Manifest,
+    /// The Original found for it, as `Title (RomM)` or `Title (Dump CUSA02320)`.
+    pub original: Option<String>,
+    pub installed: bool,
+}
+
+#[derive(Debug)]
+pub struct CatalogMatch<'a> {
+    pub port: &'a CatalogPort,
+    /// The title of the user's copy.
+    pub original: String,
+}
+
+/// The state of every Manifest, and the Catalog Ports that match games in the Library or the
+/// Dumps by title and Platform. `installed` says whether Quiver has installed a Port.
+pub fn overview<'a>(
+    manifests: &'a [Manifest],
+    library: &Library,
+    dumps: &[Dump],
+    catalog: &'a [CatalogPort],
+    installed: &dyn Fn(&QuiverApp) -> bool,
+) -> Overview<'a> {
+    let states = manifests
+        .iter()
+        .map(|manifest| {
+            let from_romm = library.entries.iter().find_map(|e| {
+                romm_original(e, &manifest.original).map(|_| format!("{} (RomM)", e.title))
+            });
+            let from_dump = || {
+                dumps
+                    .iter()
+                    .find(|d| manifest.original.accepts(d))
+                    .map(|d| format!("{} (Dump {})", d.title, d.title_id))
+            };
+            ManifestState {
+                manifest,
+                original: from_romm.or_else(from_dump),
+                installed: installed(&manifest.quiver),
+            }
+        })
+        .collect();
+    // What the user owns, as (Platform, title).
+    let owned: Vec<(&str, &str)> = library
+        .entries
+        .iter()
+        .filter_map(|e| match (&e.launch, e.source) {
+            (_, SourceKind::Port) => None,
+            (Launch::File { platform, .. }, _) => Some((platform.as_str(), e.title.as_str())),
+            (Launch::Command { .. }, _) => Some(("pc", e.title.as_str())),
+        })
+        .chain(
+            dumps
+                .iter()
+                .map(|d| (d.platform.as_str(), d.title.as_str())),
+        )
+        .collect();
+    let mut more = Vec::new();
+    for (platform, title) in owned {
+        let key = catalog::game_key(title);
+        for port in catalog {
+            let known = manifests
+                .iter()
+                .any(|m| m.quiver.repository.eq_ignore_ascii_case(&port.repository));
+            let listed = more
+                .iter()
+                .any(|m: &CatalogMatch| std::ptr::eq(m.port, port));
+            if !known
+                && !listed
+                && port.game_key == key
+                && port.platforms.iter().any(|p| p == platform)
+            {
+                more.push(CatalogMatch {
+                    port,
+                    original: title.to_owned(),
+                });
+            }
+        }
+    }
+    Overview {
+        manifests: states,
+        more,
+    }
 }
 
 /// The RomM id of `entry` if it is the release `original` names.

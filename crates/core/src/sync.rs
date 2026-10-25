@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 
 use crate::config::{Config, expand};
-use crate::dump;
+use crate::dump::{self, Dump};
 use crate::library::{Library, SourceKind};
 use crate::output::esde::EsDe;
 use crate::port;
@@ -72,6 +72,41 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
     }
 
     let mut report = Report::default();
+    let (mut library, dumps) = read_sources(config, env, &mut report)?;
+    let ports = port::entries(&port::builtin(), &library, &dumps, &env.heimspiel);
+    library.entries.extend(ports);
+
+    for entry in &library.entries {
+        match entry.source {
+            SourceKind::Steam => report.steam += 1,
+            SourceKind::Heroic => report.heroic += 1,
+            SourceKind::Manual => report.manual += 1,
+            SourceKind::RomM => report.romm += 1,
+            SourceKind::Local => report.local += 1,
+            SourceKind::Port => report.ports += 1,
+        }
+    }
+    let esde = local_folders(config, user_home).iter().fold(
+        EsDe::locate(&es_de_home, user_home)?.game_cache(&env.game_cache()),
+        |esde, f| esde.local_folder(f),
+    );
+    esde.write(&library).context("writing to ES-DE")?;
+    if config.romm.is_some() && esde.install_hook(&env.heimspiel)? {
+        report.notes.push(
+            "ES-DE: turned on event scripts and installed the game-start hook for RomM".into(),
+        );
+    }
+    Ok(report)
+}
+
+/// Reads every Source into a Library, and the Dumps for the Ports. Skipped Sources end up in
+/// `report.notes`.
+pub fn read_sources(
+    config: &Config,
+    env: &Env,
+    report: &mut Report,
+) -> anyhow::Result<(Library, Vec<Dump>)> {
+    let user_home = env.user_home.as_path();
     let mut library = Library::default();
 
     match steam_root(config, user_home) {
@@ -122,7 +157,10 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
         )?);
     }
 
-    // Ports find their Originals among the RomM games and the Dumps.
+    library
+        .entries
+        .extend(local::entries(&local_folders(config, user_home))?);
+
     let dump_folders: Vec<PathBuf> = config
         .dumps
         .folders
@@ -130,38 +168,16 @@ pub fn sync(config: &Config, env: &Env) -> anyhow::Result<Report> {
         .map(|f| expand(f, user_home))
         .collect();
     let dumps = dump::dumps(&dump_folders)?;
-    let ports = port::entries(&port::builtin(), &library, &dumps, &env.heimspiel);
-    library.entries.extend(ports);
+    Ok((library, dumps))
+}
 
-    let local_folders: Vec<PathBuf> = config
+fn local_folders(config: &Config, user_home: &Path) -> Vec<PathBuf> {
+    config
         .local
         .folders
         .iter()
         .map(|f| expand(f, user_home))
-        .collect();
-    library.entries.extend(local::entries(&local_folders)?);
-
-    for entry in &library.entries {
-        match entry.source {
-            SourceKind::Steam => report.steam += 1,
-            SourceKind::Heroic => report.heroic += 1,
-            SourceKind::Manual => report.manual += 1,
-            SourceKind::RomM => report.romm += 1,
-            SourceKind::Local => report.local += 1,
-            SourceKind::Port => report.ports += 1,
-        }
-    }
-    let esde = local_folders.iter().fold(
-        EsDe::locate(&es_de_home, user_home)?.game_cache(&env.game_cache()),
-        |esde, f| esde.local_folder(f),
-    );
-    esde.write(&library).context("writing to ES-DE")?;
-    if config.romm.is_some() && esde.install_hook(&env.heimspiel)? {
-        report.notes.push(
-            "ES-DE: turned on event scripts and installed the game-start hook for RomM".into(),
-        );
-    }
-    Ok(report)
+        .collect()
 }
 
 /// Reads the RomM token, refusing a file that others can read.

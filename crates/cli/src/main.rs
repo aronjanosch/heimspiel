@@ -6,11 +6,12 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heimspiel_core::cache::GameCache;
+use heimspiel_core::catalog;
 use heimspiel_core::config::{Config, RommConfig};
 use heimspiel_core::fetch::Fetch;
 use heimspiel_core::hook;
 use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
-use heimspiel_core::port;
+use heimspiel_core::port::{self, Manifest};
 use heimspiel_core::proton;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::{self, Quiver};
@@ -32,6 +33,13 @@ struct Cli {
 enum Command {
     /// Read all Sources and write the Library into ES-DE. Run it while ES-DE is closed.
     Sync,
+    /// List the Ports heimspiel sets up and what each still needs, and other Ports for games you
+    /// own.
+    Ports {
+        /// Also list Ports without a release, which you would have to build yourself.
+        #[arg(long)]
+        all: bool,
+    },
     /// Install, provision and run a Port; the entries `heimspiel sync` writes call this.
     #[command(group = clap::ArgGroup::new("original").required(true))]
     Launch {
@@ -105,6 +113,64 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Ports { all } => {
+            let mut report = sync::Report::default();
+            let (library, dumps) = sync::read_sources(&config, &env, &mut report)?;
+            let catalog = catalog::load(
+                catalog::URL,
+                &env.cache_dir.join("catalog/games.json"),
+                Duration::from_secs(24 * 60 * 60),
+            )?;
+            let quiver = Quiver::new(&env.quiver_dir());
+            let manifests = port::builtin();
+            let overview = port::overview(&manifests, &library, &dumps, &catalog, &|app| {
+                quiver.is_installed(app)
+            });
+            println!("Ports heimspiel sets up:");
+            for state in &overview.manifests {
+                let status = match (&state.original, state.installed) {
+                    (Some(original), true) => format!("installed; Original: {original}"),
+                    (Some(original), false) => {
+                        format!("installs on first start; Original: {original}")
+                    }
+                    (None, _) => format!("needs {}", needed(state.manifest)),
+                };
+                println!("  {}: {status}", state.manifest.title);
+            }
+            let (released, to_build): (Vec<_>, Vec<_>) =
+                overview.more.iter().partition(|m| m.port.release.is_some());
+            let shown = if all {
+                overview.more.iter().collect()
+            } else {
+                released
+            };
+            if !shown.is_empty() {
+                println!(
+                    "\nMore Ports for games you own, on GitHub (heimspiel cannot set these up yet):"
+                );
+                let mut by_game: std::collections::BTreeMap<&str, Vec<_>> = Default::default();
+                for m in shown {
+                    by_game.entry(m.original.as_str()).or_default().push(m.port);
+                }
+                for (game, ports) in by_game {
+                    println!("  {game}");
+                    for port in ports {
+                        let release = port.release.as_deref().unwrap_or("build it yourself");
+                        println!("    {}  {release}  {}", port.repository, port.kind);
+                    }
+                }
+            }
+            if !all && !to_build.is_empty() {
+                println!(
+                    "\n{} more without a release, to build yourself: heimspiel ports --all",
+                    to_build.len()
+                );
+            }
+            for note in report.notes {
+                println!("{note}");
+            }
+            Ok(())
+        }
         Command::Launch {
             port,
             romm: rom_id,
@@ -161,6 +227,27 @@ fn main() -> anyhow::Result<()> {
             hook::game_start(&fetch(&client, &cache), &args)
         }
     }
+}
+
+/// What a Port's Original is, for someone who does not have it yet.
+fn needed(manifest: &Manifest) -> String {
+    let original = &manifest.original;
+    if !original.title_ids.is_empty() {
+        return format!("a Dump of {}", original.title_ids.join(" or "));
+    }
+    let releases: Vec<String> = original
+        .releases
+        .iter()
+        .map(|r| match &r.revision {
+            Some(revision) => format!("{} Rev {revision}", r.region),
+            None => r.region.clone(),
+        })
+        .collect();
+    format!(
+        "its {} Original in RomM ({})",
+        original.platform,
+        releases.join(", ")
+    )
 }
 
 fn romm_access(romm: &RommConfig, env: &Env) -> anyhow::Result<(Romm, GameCache)> {

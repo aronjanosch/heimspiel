@@ -49,6 +49,10 @@ Close ES-DE and run `heimspiel sync`. RomM games show up with metadata and cover
 the first time you start them, through an ES-DE event script that `sync` installs. Ports appear in
 ES-DE's `ports` system; the first start installs the port through Quiver and hands it your original.
 
+`heimspiel ports` lists the ports heimspiel sets up and what each still needs, and the other ports for
+games you own, from the [awesome-decomp-games](https://github.com/SubmitGame/awesome-decomp-games)
+catalog (`--all` includes projects without a release).
+
 ## Building blocks
 
 | Part | Project |
@@ -57,7 +61,7 @@ ES-DE's `ports` system; the first start installs the port through Quiver and han
 | Emulators | Flatpak (Linux) / winget (Windows), configs from EmuDeck |
 | Recomp install, update, launch (incl. Proton) | Quiver Launcher CLI |
 | ROM library | RomM, through its REST API |
-| Recomp catalog and original hashes | recomp.fyi, awesome-decomp-games |
+| Port catalog | awesome-decomp-games (CC0); recomp.fyi for original hashes later |
 
 ## License
 

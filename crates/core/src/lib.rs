@@ -14,6 +14,7 @@ pub mod library;
 pub mod output;
 pub mod port;
 mod process;
+pub mod progress;
 pub mod proton;
 pub mod provision;
 pub mod quiver;

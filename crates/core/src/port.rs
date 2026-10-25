@@ -399,7 +399,7 @@ pub fn overview<'a>(
 fn romm_original(entry: &Entry, original: &Original) -> Option<u64> {
     let Launch::File {
         platform,
-        location: FileLocation::RomM { rom_id },
+        location: FileLocation::RomM { rom_id, .. },
         ..
     } = &entry.launch
     else {

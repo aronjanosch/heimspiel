@@ -1,11 +1,11 @@
-//! The cache of game files fetched from RomM, limited in size. Each game lives in
-//! `<dir>/<rom id>/<file name>`; its modification time records when it was last played.
+//! The cache of game files fetched from RomM, limited in size. Each game lives in its own folder
+//! `<dir>/<rom id>/`; the modification time of its files records when it was last played.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 pub struct GameCache {
     dir: PathBuf,
@@ -20,46 +20,69 @@ impl GameCache {
         }
     }
 
-    /// Where a game is or would be stored. The ROM id is part of the path, so a link to a game
-    /// that was dropped from the cache still tells which game to fetch again.
-    pub fn path(&self, rom_id: u64, file_name: &str) -> PathBuf {
-        let name = file_name.replace(['/', '\\'], "-");
-        self.dir
-            .join(rom_id.to_string())
-            .join(name.trim_start_matches('.'))
+    /// The folder of a game. The ROM id is part of every path inside, so a link to a game that
+    /// was dropped from the cache still tells which game to fetch again.
+    pub fn game_dir(&self, rom_id: u64) -> PathBuf {
+        self.dir.join(rom_id.to_string())
     }
 
-    /// The ROM id of a game path inside this cache, as returned by [`GameCache::path`].
+    /// Where a file of a game is or would be stored; `relative` may name subfolders with `/`.
+    pub fn path(&self, rom_id: u64, relative: &str) -> PathBuf {
+        relative
+            .split(['/', '\\'])
+            .map(|part| part.trim_start_matches('.'))
+            .filter(|part| !part.is_empty())
+            .fold(self.game_dir(rom_id), |path, part| path.join(part))
+    }
+
+    /// The ROM id of a path inside this cache, as returned by [`GameCache::path`].
     pub fn rom_id_of(&self, path: &Path) -> Option<u64> {
         let dir = path.strip_prefix(&self.dir).ok()?.components().next()?;
         dir.as_os_str().to_str()?.parse().ok()
     }
 
-    /// The cached game, marked as just played.
-    pub fn get(&self, rom_id: u64, file_name: &str) -> Option<PathBuf> {
-        let path = self.path(rom_id, file_name);
-        let file = fs::File::options().write(true).open(&path).ok()?;
+    /// Marks the game holding the file at `path` as just played; false if the file is not there.
+    pub fn mark_played(&self, path: &Path) -> bool {
+        let Ok(file) = fs::File::options().write(true).open(path) else {
+            return false;
+        };
         let _ = file.set_modified(SystemTime::now());
-        Some(path)
+        true
     }
 
-    /// Makes room for `size` bytes, then lets `write` fill the game's file. Nothing is kept if
-    /// `write` fails.
+    /// Stores a file of `size` bytes at [`GameCache::path`]. Makes room first, then lets `write`
+    /// fill the file's `.part`, which may already hold the start of an earlier attempt. A failed
+    /// attempt keeps the part for the next one; only a part of exactly `size` bytes becomes the
+    /// file.
     pub fn store(
         &self,
         rom_id: u64,
-        file_name: &str,
+        relative: &str,
         size: u64,
         write: impl FnOnce(&Path) -> anyhow::Result<()>,
     ) -> anyhow::Result<PathBuf> {
-        self.make_room(rom_id, size)?;
-        let path = self.path(rom_id, file_name);
+        let path = self.path(rom_id, relative);
+        let mut part = path.clone().into_os_string();
+        part.push(".part");
+        let part = PathBuf::from(part);
+        let mut have = fs::metadata(&part).map_or(0, |m| m.len());
+        if have > size {
+            fs::remove_file(&part).with_context(|| format!("removing {}", part.display()))?;
+            have = 0;
+        }
+        self.make_room(rom_id, size - have)?;
         let dir = path.parent().unwrap();
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let part = path.with_extension("part");
-        if let Err(e) = write(&part) {
+        if have < size {
+            write(&part)?;
+        }
+        let got = fs::metadata(&part).map_or(0, |m| m.len());
+        if got != size {
             let _ = fs::remove_file(&part);
-            return Err(e);
+            bail!(
+                "received {got} bytes of {}, expected {size}",
+                path.display()
+            );
         }
         fs::rename(&part, &path).with_context(|| format!("replacing {}", path.display()))?;
         Ok(path)
@@ -74,11 +97,7 @@ impl GameCache {
             if total + size <= self.limit {
                 break;
             }
-            if game
-                .dir
-                .file_name()
-                .is_some_and(|n| n == keep.to_string().as_str())
-            {
+            if game.dir == self.game_dir(keep) {
                 continue;
             }
             fs::remove_dir_all(&game.dir)
@@ -95,23 +114,34 @@ impl GameCache {
         let mut games = Vec::new();
         for dir in dirs {
             let dir = dir?.path();
-            let Ok(files) = fs::read_dir(&dir) else {
-                continue;
-            };
             let mut game = CachedGame {
                 dir: dir.clone(),
                 size: 0,
                 played: SystemTime::UNIX_EPOCH,
             };
-            for file in files {
-                let meta = file?.metadata()?;
-                game.size += meta.len();
-                game.played = game.played.max(meta.modified()?);
-            }
+            add_files(&dir, &mut game)?;
             games.push(game);
         }
         Ok(games)
     }
+}
+
+/// Adds the size and latest modification of every file below `dir` to `game`.
+fn add_files(dir: &Path, game: &mut CachedGame) -> anyhow::Result<()> {
+    let Ok(items) = fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for item in items {
+        let item = item?;
+        let meta = item.metadata()?;
+        if meta.is_dir() {
+            add_files(&item.path(), game)?;
+        } else {
+            game.size += meta.len();
+            game.played = game.played.max(meta.modified()?);
+        }
+    }
+    Ok(())
 }
 
 struct CachedGame {

@@ -12,6 +12,7 @@ use heimspiel_core::fetch::Fetch;
 use heimspiel_core::hook;
 use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
 use heimspiel_core::port::{self, Manifest};
+use heimspiel_core::progress::Progress;
 use heimspiel_core::proton;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::{self, Quiver};
@@ -191,12 +192,13 @@ fn main() -> anyhow::Result<()> {
                 (None, Some(dump)) => OriginalLocation::Dump(std::path::absolute(dump)?),
                 (None, None) => unreachable!("clap requires one"),
             };
-            let result = with_port_launch(&config, &env, &[], |ctx| {
+            let progress = progress();
+            let result = with_port_launch(&config, &env, &*progress, &[], |ctx| {
                 launch::run(ctx, &port, &original, game.as_deref())
             });
             // ES-DE shows nothing when a launch fails.
             if let Err(e) = &result {
-                notify(&format!("Could not start {port}: {e:#}"));
+                progress.fail(&format!("Could not start {port}: {e:#}"));
             }
             result
         }
@@ -225,7 +227,7 @@ fn main() -> anyhow::Result<()> {
             ]
             .map(String::from)
             .into();
-            with_port_launch(&config, &env, &wrapper, |ctx| {
+            with_port_launch(&config, &env, &(), &wrapper, |ctx| {
                 launch::check(
                     ctx,
                     &port,
@@ -249,7 +251,13 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             };
             let (client, cache) = romm_access(romm, &env)?;
-            hook::game_start(&fetch(&client, &cache), &args)
+            let progress = progress();
+            let result = hook::game_start(&fetch(&client, &cache, &env, &*progress), &args);
+            // Only heimspiel's own games fail here; ES-DE would start the emulator regardless.
+            if let Err(e) = &result {
+                progress.fail(&format!("{e:#}"));
+            }
+            result
         }
     }
 }
@@ -258,6 +266,7 @@ fn main() -> anyhow::Result<()> {
 fn with_port_launch(
     config: &Config,
     env: &Env,
+    progress: &dyn Progress,
     wrapper: &[String],
     f: impl FnOnce(&PortLaunch) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
@@ -265,7 +274,9 @@ fn with_port_launch(
         Some(romm) => Some(romm_access(romm, env)?),
         None => None,
     };
-    let fetch = romm.as_ref().map(|(client, cache)| fetch(client, cache));
+    let fetch = romm
+        .as_ref()
+        .map(|(client, cache)| fetch(client, cache, env, progress));
     let quiver = Quiver::new(&env.quiver_dir());
     let base = |var: &str, fallback: &str| {
         env::var_os(var)
@@ -282,7 +293,7 @@ fn with_port_launch(
         quiver: &quiver,
         proton: proton.as_ref(),
         fetch: fetch.as_ref(),
-        notify: &notify,
+        progress,
         homes: &homes,
         install_timeout: Duration::from_secs(30 * 60),
         wrapper,
@@ -320,12 +331,39 @@ fn romm_access(romm: &RommConfig, env: &Env) -> anyhow::Result<(Romm, GameCache)
     Ok((client, cache))
 }
 
-fn fetch<'a>(client: &'a Romm, cache: &'a GameCache) -> Fetch<'a> {
+fn fetch<'a>(
+    client: &'a Romm,
+    cache: &'a GameCache,
+    env: &'a Env,
+    progress: &'a dyn Progress,
+) -> Fetch<'a> {
     Fetch {
         client,
         cache,
-        notify: &notify,
-        notify_from_bytes: 64 << 20,
+        covers: env.cover_cache(),
+        progress,
+        show_from_bytes: 64 << 20,
+    }
+}
+
+/// Shows long steps as desktop notifications.
+fn progress() -> Box<dyn Progress> {
+    Box::new(Notifications)
+}
+
+struct Notifications;
+
+impl Progress for Notifications {
+    fn start(&self, game: &str, _cover: Option<&std::path::Path>, action: &str) {
+        notify(&format!("{action} {game} …"));
+    }
+
+    fn advance(&self, _done_bytes: u64, _total_bytes: u64) {}
+
+    fn finish(&self) {}
+
+    fn fail(&self, message: &str) {
+        notify(message);
     }
 }
 

@@ -33,6 +33,11 @@ impl Env {
         self.cache_dir.join("romm/games")
     }
 
+    /// Where `heimspiel sync` keeps the covers of RomM games.
+    pub fn cover_cache(&self) -> PathBuf {
+        self.cache_dir.join("romm/covers")
+    }
+
     /// heimspiel's own Quiver installation.
     pub fn quiver_dir(&self) -> PathBuf {
         self.data_dir.join("quiver")
@@ -153,7 +158,7 @@ pub fn read_sources(
         library.entries.extend(romm::entries(
             &client,
             &romm_config.platforms,
-            &env.cache_dir.join("romm/covers"),
+            &env.cover_cache(),
         )?);
     }
 

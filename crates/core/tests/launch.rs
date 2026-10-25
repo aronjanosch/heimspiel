@@ -46,9 +46,11 @@ xxh3 = "{:#x}"
 fn romm() -> FakeServer {
     FakeServer::start(|req| match req.path.as_str() {
         "/api/roms/7" => Response::json(
-            r#"{"id": 7, "fs_name": "Test (USA).n64", "name": "Test", "fs_size_bytes": 8, "has_multiple_files": false}"#,
+            r#"{"id": 7, "fs_name": "Test (USA).n64", "fs_path": "roms/n64", "name": "Test",
+                "files": [{"id": 70, "file_name": "Test (USA).n64", "file_path": "roms/n64",
+                           "file_size_bytes": 8}]}"#,
         ),
-        "/api/roms/7/content/Test%20%28USA%29.n64" => Response {
+        "/api/roms/70/files/content/Test%20%28USA%29.n64" => Response {
             status: 200,
             body: V64.to_vec(),
         },
@@ -153,8 +155,9 @@ fn with_ctx<T>(
     let fetch = Fetch {
         client: &client,
         cache: &cache,
-        notify: &|_| {},
-        notify_from_bytes: u64::MAX,
+        covers: s.tmp.path().join("covers"),
+        progress: &(),
+        show_from_bytes: u64::MAX,
     };
     let quiver = Quiver::new(&s.quiver_dir);
     let homes = Homes {
@@ -180,7 +183,7 @@ fn with_ctx<T>(
         quiver: &quiver,
         proton: Some(&proton),
         fetch: Some(&fetch),
-        notify: &|_| {},
+        progress: &(),
         homes: &homes,
         install_timeout,
         wrapper,

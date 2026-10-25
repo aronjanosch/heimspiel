@@ -17,6 +17,7 @@ use crate::fetch::Fetch;
 pub use crate::port::OriginalLocation;
 use crate::port::{Manifest, QuiverApp, Runner};
 use crate::process::stop;
+use crate::progress::Progress;
 use crate::proton::Proton;
 use crate::provision::{self, Homes};
 use crate::quiver::{Install, Pin, Quiver};
@@ -28,7 +29,8 @@ pub struct PortLaunch<'a> {
     pub proton: Option<&'a Proton>,
     /// Access to RomM, for Ports whose Original is there.
     pub fetch: Option<&'a Fetch<'a>>,
-    pub notify: &'a dyn Fn(&str),
+    /// Shows the installation of a Port; finished right before the Port starts.
+    pub progress: &'a dyn Progress,
     pub homes: &'a Homes,
     pub install_timeout: Duration,
     /// A command line every program heimspiel starts for the Port runs inside, such as a
@@ -48,6 +50,7 @@ pub fn run(
     game: Option<&str>,
 ) -> anyhow::Result<()> {
     let mut command = prepare(ctx, port_id, original, game)?;
+    ctx.progress.finish();
     let log = ctx.quiver.open_log()?;
     let status = command
         .stdin(Stdio::null())
@@ -77,6 +80,7 @@ pub fn check(
     log: &Path,
 ) -> anyhow::Result<()> {
     let mut command = prepare(ctx, port_id, original, game)?;
+    ctx.progress.finish();
     let output = fs::File::create(log).with_context(|| format!("creating {}", log.display()))?;
     let mut child = command
         .env("SDL_AUDIODRIVER", "dummy")
@@ -140,7 +144,12 @@ fn prepare(
     if ctx.quiver.is_installed(app) {
         ctx.quiver.ensure_entry(app, Pin::Keep)?;
     } else {
-        (ctx.notify)(&format!("Installing {} …", manifest.title));
+        let cover = match (original, ctx.fetch) {
+            (OriginalLocation::RomM(rom_id), Some(fetch)) => fetch.cover(*rom_id),
+            _ => None,
+        };
+        ctx.progress
+            .start(&manifest.title, cover.as_deref(), "Installing");
         let mut version = match ctx.quiver.catalog_version(app) {
             Some(listed) => listed,
             None => (ctx.latest_version)(app)?,

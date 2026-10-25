@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::library::{Entry, FileLocation, Identity, Launch, Metadata, SourceKind};
-use crate::romm::{Rom, Romm};
+use crate::library::{Entry, FileLocation, Identity, Launch, Layout, Metadata, SourceKind};
+use crate::romm::{Rom, Romm, Start};
 
 /// Files RomM keeps next to games that are not games: saves, screenshots, notes.
 const NOT_GAMES: &[&str] = &[
@@ -14,7 +14,8 @@ const NOT_GAMES: &[&str] = &[
 ];
 
 /// Reads the games of the given platforms (RomM slugs such as `n64`). Covers are downloaded once
-/// into `cover_cache` and reused on later syncs.
+/// into `cover_cache` and reused on later syncs. Games made of several files are left out when
+/// their files do not tell what to start.
 pub fn entries(
     client: &Romm,
     platforms: &[String],
@@ -26,10 +27,14 @@ pub fn entries(
             continue;
         }
         for rom in client.roms(platform.id)? {
-            if is_game(&rom.fs_name) {
-                let cover = cover(client, &rom, cover_cache)?;
-                entries.push(entry(rom, &platform.slug, cover));
+            if !is_game(&rom.fs_name) {
+                continue;
             }
+            let Some((file_name, layout)) = placement(client, &rom)? else {
+                continue;
+            };
+            let cover = cover(client, &rom, cover_cache)?;
+            entries.push(entry(rom, &platform.slug, file_name, layout, cover));
         }
     }
     Ok(entries)
@@ -44,7 +49,34 @@ pub(crate) fn is_game(file_name: &str) -> bool {
     !NOT_GAMES.contains(&ext.as_str())
 }
 
-fn entry(rom: Rom, platform: &str, cover: Option<PathBuf>) -> Entry {
+/// The game's name in a frontend's ROM folder and the layout of its files there. A game made of
+/// several files becomes a folder named after what is started, such as `Metal Slug 6.gdi`.
+fn placement(client: &Romm, rom: &Rom) -> anyhow::Result<Option<(String, Layout)>> {
+    if !rom.has_multiple_files {
+        return Ok(Some((rom.fs_name.clone(), Layout::File)));
+    }
+    let extension = match client.rom(rom.id)?.start() {
+        None => return Ok(None),
+        Some(Start::Folder) => return Ok(Some((rom.fs_name.clone(), Layout::Folder))),
+        Some(Start::File(file)) => match file.rsplit_once('.') {
+            Some((_, extension)) => extension.to_owned(),
+            None => return Ok(None),
+        },
+        Some(Start::Playlist(_)) => "m3u".to_owned(),
+    };
+    Ok(Some((
+        format!("{}.{extension}", rom.fs_name),
+        Layout::StartInFolder,
+    )))
+}
+
+fn entry(
+    rom: Rom,
+    platform: &str,
+    file_name: String,
+    layout: Layout,
+    cover: Option<PathBuf>,
+) -> Entry {
     let meta = rom.metadatum.unwrap_or_default();
     let identity = Identity {
         igdb_id: rom.igdb_id,
@@ -57,8 +89,11 @@ fn entry(rom: Rom, platform: &str, cover: Option<PathBuf>) -> Entry {
         title: rom.name,
         launch: Launch::File {
             platform: platform.to_owned(),
-            file_name: rom.fs_name,
-            location: FileLocation::RomM { rom_id: rom.id },
+            file_name,
+            location: FileLocation::RomM {
+                rom_id: rom.id,
+                layout,
+            },
         },
         cover,
         metadata: Metadata {

@@ -1,5 +1,6 @@
 //! ES-DE: per Entry a `.desktop` file (PC games) or a Placeholder (game files) in the system's ROM
-//! folder, plus its `gamelist.xml` entry and cover.
+//! folder, plus its `gamelist.xml` entry and cover. A RomM game made of several files becomes a
+//! folder that ES-DE treats as one game (its "directories interpreted as files").
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use xmltree::{Element, EmitterConfig, XMLNode};
 
-use crate::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
+use crate::library::{Entry, FileLocation, Launch, Layout, Library, Metadata, SourceKind};
 
 /// The folders of one ES-DE installation.
 pub struct EsDe {
@@ -153,8 +154,19 @@ impl EsDe {
                         _ => (name, String::new()),
                     };
                     let content = match location {
-                        FileLocation::RomM { rom_id } => {
-                            Content::File(format!("{PLACEHOLDER}romm:{rom_id}\n"))
+                        FileLocation::RomM { rom_id, layout } => {
+                            let placeholder = format!("{PLACEHOLDER}romm:{rom_id}\n");
+                            match layout {
+                                Layout::File => Content::File(placeholder),
+                                Layout::StartInFolder => Content::Folder {
+                                    placeholder,
+                                    start: true,
+                                },
+                                Layout::Folder => Content::Folder {
+                                    placeholder,
+                                    start: false,
+                                },
+                            }
                         }
                         FileLocation::Local { path } => Content::Link(path),
                     };
@@ -173,19 +185,28 @@ impl EsDe {
                 .find(|f| !foreign(f) && !added.iter().any(|(a, _)| a == f))
                 .unwrap();
             let path = dir.join(&file);
+            let cache: Vec<&Path> = self.game_cache.iter().map(PathBuf::as_path).collect();
             match content {
                 // A fetched game stays linked; the hook made that link from this Placeholder.
-                Content::File(_)
-                    if is_link_into(
-                        &path,
-                        &self
-                            .game_cache
-                            .iter()
-                            .map(PathBuf::as_path)
-                            .collect::<Vec<_>>(),
-                    ) => {}
-                Content::File(text) => write_if_changed(&path, text.as_bytes())?,
-                Content::Link(target) => link(&path, target)?,
+                Content::File(_) if is_link_into(&path, &cache) => {}
+                Content::File(text) => {
+                    clear_other_kind(&path, false)?;
+                    write_if_changed(&path, text.as_bytes())?;
+                }
+                Content::Folder { placeholder, start } => {
+                    clear_other_kind(&path, true)?;
+                    fs::create_dir_all(&path)
+                        .with_context(|| format!("creating {}", path.display()))?;
+                    write_if_changed(&path.join(FOLDER_MARKER), placeholder.as_bytes())?;
+                    let inner = path.join(&file);
+                    if start && !is_link_into(&inner, &cache) {
+                        write_if_changed(&inner, placeholder.as_bytes())?;
+                    }
+                }
+                Content::Link(target) => {
+                    clear_other_kind(&path, false)?;
+                    link(&path, target)?;
+                }
             }
             if let Some(cover) = &entry.cover {
                 self.place_cover(system, &file, cover)?;
@@ -195,7 +216,7 @@ impl EsDe {
         let mut removed = Vec::new();
         for file in own {
             if !added.iter().any(|(name, _)| *name == file) {
-                fs::remove_file(dir.join(&file)).with_context(|| format!("removing {file}"))?;
+                remove_own(&dir.join(&file))?;
                 self.remove_covers(system, &file)?;
                 removed.push(file);
             }
@@ -319,7 +340,11 @@ impl Gamelist {
 const MARKER: &str = "X-Heimspiel-Id=";
 
 /// First line of every Placeholder heimspiel writes.
-const PLACEHOLDER: &str = "heimspiel-placeholder ";
+pub(crate) const PLACEHOLDER: &str = "heimspiel-placeholder ";
+
+/// Hidden file in the folders heimspiel writes for games made of several files, holding the
+/// game's Placeholder text. ES-DE skips hidden files.
+pub(crate) const FOLDER_MARKER: &str = ".heimspiel";
 
 /// The ES-DE system an Entry goes into.
 fn system(entry: &Entry) -> String {
@@ -372,7 +397,33 @@ fn desktop_file(entry: &Entry) -> String {
 /// What an Entry becomes in a ROM folder.
 enum Content<'a> {
     File(String),
+    /// A folder marked with `placeholder`; with `start`, also holding a Placeholder named like
+    /// the folder for the file ES-DE starts.
+    Folder {
+        placeholder: String,
+        start: bool,
+    },
     Link(&'a Path),
+}
+
+/// Removes what heimspiel wrote at `path` if it is a folder and should not be, or the other way
+/// round.
+fn clear_other_kind(path: &Path, folder: bool) -> anyhow::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() != folder => remove_own(path),
+        _ => Ok(()),
+    }
+}
+
+/// Removes a file, link or folder that heimspiel wrote. Its folders hold only links into the
+/// cache and Placeholders, never game files.
+fn remove_own(path: &Path) -> anyhow::Result<()> {
+    if fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+    .with_context(|| format!("removing {}", path.display()))
 }
 
 /// Points `path` at `target`, replacing what heimspiel had there before.
@@ -387,14 +438,20 @@ fn link(path: &Path, target: &Path) -> anyhow::Result<()> {
     fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
-/// Names of the files in `dir` that heimspiel wrote: marked `.desktop` files and Placeholders.
-/// Only small files are opened, so real game files are never read.
+/// Names of the files in `dir` that heimspiel wrote: marked `.desktop` files, Placeholders, links
+/// and marked folders. Only small files are opened, so real game files are never read.
 fn own_files(dir: &Path, link_roots: &[&Path]) -> anyhow::Result<Vec<String>> {
     let mut files = Vec::new();
     for item in fs::read_dir(dir)? {
         let item = item?;
         let meta = item.metadata()?;
-        if meta.is_symlink() && is_link_into(&item.path(), link_roots) {
+        let own_folder = || {
+            fs::read_to_string(item.path().join(FOLDER_MARKER))
+                .is_ok_and(|text| text.starts_with(PLACEHOLDER))
+        };
+        if (meta.is_symlink() && is_link_into(&item.path(), link_roots))
+            || (meta.is_dir() && own_folder())
+        {
             files.push(item.file_name().to_string_lossy().into_owned());
             continue;
         }

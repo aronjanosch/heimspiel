@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use heimspiel_core::catalog::CatalogPort;
 use heimspiel_core::dump;
 use heimspiel_core::library::{
-    Entry, FileLocation, Identity, Launch, Library, Metadata, SourceKind,
+    Entry, FileLocation, Identity, Launch, Layout, Library, Metadata, SourceKind,
 };
 use heimspiel_core::port::{self, Manifest, OriginalLocation, Provide};
 
@@ -38,7 +38,10 @@ fn romm(rom_id: u64, igdb_id: u64, region: &str, revision: Option<&str>) -> Entr
         launch: Launch::File {
             platform: "n64".into(),
             file_name: "MM.n64".into(),
-            location: FileLocation::RomM { rom_id },
+            location: FileLocation::RomM {
+                rom_id,
+                layout: Layout::File,
+            },
         },
         cover: Some(PathBuf::from("/cache/covers/3037.png")),
         metadata: Metadata::default(),

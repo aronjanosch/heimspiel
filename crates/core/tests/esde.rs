@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use heimspiel_core::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
+use heimspiel_core::library::{Entry, FileLocation, Launch, Layout, Library, Metadata, SourceKind};
 use heimspiel_core::output::esde::EsDe;
 
 struct Setup {
@@ -52,6 +52,16 @@ fn steam(id: &str, title: &str) -> Entry {
 }
 
 fn romm(rom_id: u64, platform: &str, file_name: &str, title: &str) -> Entry {
+    romm_laid_out(rom_id, platform, file_name, title, Layout::File)
+}
+
+fn romm_laid_out(
+    rom_id: u64,
+    platform: &str,
+    file_name: &str,
+    title: &str,
+    layout: Layout,
+) -> Entry {
     Entry {
         source: SourceKind::RomM,
         id: rom_id.to_string(),
@@ -59,7 +69,7 @@ fn romm(rom_id: u64, platform: &str, file_name: &str, title: &str) -> Entry {
         launch: Launch::File {
             platform: platform.into(),
             file_name: file_name.into(),
-            location: FileLocation::RomM { rom_id },
+            location: FileLocation::RomM { rom_id, layout },
         },
         cover: None,
         metadata: Metadata::default(),
@@ -325,6 +335,103 @@ fn keeps_a_link_to_a_fetched_game_and_removes_it_with_the_game() {
 
     esde.write(&library(vec![])).unwrap();
     assert!(fs::symlink_metadata(&game).is_err());
+}
+
+#[test]
+fn writes_a_game_of_several_files_as_a_folder_es_de_treats_as_one_game() {
+    let s = setup();
+
+    s.esde
+        .write(&library(vec![
+            romm_laid_out(
+                12566,
+                "dc",
+                "Metal Slug 6.gdi",
+                "Metal Slug 6",
+                Layout::StartInFolder,
+            ),
+            romm_laid_out(846, "scummvm", "Tentacle.svm", "Tentacle", Layout::Folder),
+        ]))
+        .unwrap();
+
+    let gdi = s.roms.join("dreamcast/Metal Slug 6.gdi");
+    assert_eq!(
+        read(gdi.join("Metal Slug 6.gdi")),
+        "heimspiel-placeholder romm:12566\n"
+    );
+    assert_eq!(
+        read(gdi.join(".heimspiel")),
+        "heimspiel-placeholder romm:12566\n"
+    );
+    let svm = s.roms.join("scummvm/Tentacle.svm");
+    assert_eq!(fs::read_dir(&svm).unwrap().count(), 1);
+    assert_eq!(
+        read(svm.join(".heimspiel")),
+        "heimspiel-placeholder romm:846\n"
+    );
+    assert!(
+        read(s.home.join("gamelists/dreamcast/gamelist.xml"))
+            .contains("<path>./Metal Slug 6.gdi</path>")
+    );
+}
+
+#[test]
+fn keeps_a_fetched_folder_and_removes_it_with_the_game_but_no_foreign_folder() {
+    let s = setup();
+    let cache = s.home.parent().unwrap().join("cache");
+    let esde = EsDe::locate(&s.home, s.home.parent().unwrap())
+        .unwrap()
+        .game_cache(&cache);
+    let metal_slug = || {
+        library(vec![romm_laid_out(
+            12566,
+            "dc",
+            "Metal Slug 6.gdi",
+            "Metal Slug 6",
+            Layout::StartInFolder,
+        )])
+    };
+    esde.write(&metal_slug()).unwrap();
+    // The hook linked the game's files into the folder.
+    let folder = s.roms.join("dreamcast/Metal Slug 6.gdi");
+    let cached = cache.join("12566/disc.gdi");
+    fs::create_dir_all(cached.parent().unwrap()).unwrap();
+    fs::write(&cached, b"gdi").unwrap();
+    fs::remove_file(folder.join("Metal Slug 6.gdi")).unwrap();
+    std::os::unix::fs::symlink(&cached, folder.join("Metal Slug 6.gdi")).unwrap();
+    std::os::unix::fs::symlink(&cached, folder.join("disc.gdi")).unwrap();
+    // A game folder of the user's own.
+    let foreign = s.roms.join("dreamcast/Mine.gdi");
+    fs::create_dir_all(&foreign).unwrap();
+    fs::write(foreign.join("Mine.gdi"), b"gdi").unwrap();
+
+    esde.write(&metal_slug()).unwrap();
+    assert_eq!(fs::read(folder.join("Metal Slug 6.gdi")).unwrap(), b"gdi");
+
+    esde.write(&library(vec![])).unwrap();
+    assert!(!folder.exists());
+    assert!(cached.exists());
+    assert!(foreign.join("Mine.gdi").exists());
+}
+
+#[test]
+fn turns_a_placeholder_into_a_folder_when_the_game_gained_files() {
+    let s = setup();
+    s.esde
+        .write(&library(vec![romm(7, "psx", "Riven.m3u", "Riven")]))
+        .unwrap();
+
+    s.esde
+        .write(&library(vec![romm_laid_out(
+            7,
+            "psx",
+            "Riven.m3u",
+            "Riven",
+            Layout::StartInFolder,
+        )]))
+        .unwrap();
+
+    assert!(s.roms.join("psx/Riven.m3u/Riven.m3u").is_file());
 }
 
 #[test]

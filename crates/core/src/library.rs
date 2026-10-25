@@ -51,9 +51,20 @@ pub enum Launch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileLocation {
     /// On a RomM server, fetched when the game is started.
-    RomM { rom_id: u64 },
+    RomM { rom_id: u64, layout: Layout },
     /// In a local folder.
     Local { path: PathBuf },
+}
+
+/// How the files of a game fetched from RomM are laid out where a frontend looks for games.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    /// One file.
+    File,
+    /// A folder named like the file in it that is started, next to the game's other files.
+    StartInFolder,
+    /// A folder that is started as a whole, such as a ScummVM `.svm` folder.
+    Folder,
 }
 
 /// Descriptive data for frontends; every field is optional.

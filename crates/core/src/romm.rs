@@ -5,8 +5,8 @@
 use std::cell::Cell;
 use std::fmt;
 use std::fs;
-use std::io;
-use std::path::Path;
+use std::io::{self, Write};
+use std::path::{Component, Path};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -62,6 +62,9 @@ pub struct Rom {
     /// Empty for the first release.
     #[serde(default)]
     pub revision: Option<String>,
+    /// Whether the game is a folder of files rather than one file.
+    #[serde(default)]
+    pub has_multiple_files: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -79,11 +82,125 @@ pub struct RomMetadata {
 #[derive(Debug, Deserialize)]
 pub struct RomDetail {
     pub id: u64,
+    /// The game's file, or its folder for games made of several files.
     pub fs_name: String,
+    /// Extension of `fs_name`; for a folder such as `Day of the Tentacle.svm` it marks a folder
+    /// that emulators open as a whole.
+    #[serde(default)]
+    pub fs_extension: String,
+    /// The server folder holding `fs_name`, e.g. `roms/dc`.
+    pub fs_path: String,
     pub name: String,
-    pub fs_size_bytes: u64,
     #[serde(default)]
     pub has_multiple_files: bool,
+    pub files: Vec<RomFile>,
+}
+
+/// One file of a game.
+#[derive(Debug, Deserialize)]
+pub struct RomFile {
+    pub id: u64,
+    pub file_name: String,
+    /// The server folder holding the file, e.g. `roms/dc/Metal Slug 6`.
+    pub file_path: String,
+    pub file_size_bytes: u64,
+}
+
+/// What a frontend starts of a game.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Start {
+    /// This file, relative to the game's folder.
+    File(String),
+    /// These discs, in this order, through a playlist (`.m3u`) that heimspiel writes.
+    Playlist(Vec<String>),
+    /// The game's folder itself.
+    Folder,
+}
+
+/// Disc descriptions that name the tracks next to them, in order of preference.
+const DISC_INDEXES: &[&str] = &["m3u", "cue", "gdi", "ccd", "mds", "toc"];
+
+/// Disc images complete in themselves; several of them make a multi-disc game.
+const DISC_IMAGES: &[&str] = &["chd", "pbp", "cso", "zso", "cdi", "iso", "rvz", "wbfs"];
+
+/// Files that accompany the file a frontend starts: tracks, MSU-1 audio, notes, checksums.
+const COMPANIONS: &[&str] = &[
+    "bin", "raw", "img", "sub", "wav", "mp3", "ogg", "pcm", "msu", "bml", "xml", "txt", "nfo",
+    "md5", "sfv", "png", "jpg", "pdf",
+];
+
+impl RomDetail {
+    /// Where `file` belongs inside the game's folder, e.g. `track01.iso` or `data/Stage/0.pxa`.
+    pub fn relative_path(&self, file: &RomFile) -> anyhow::Result<String> {
+        let root = if self.has_multiple_files {
+            format!("{}/{}", self.fs_path, self.fs_name)
+        } else {
+            self.fs_path.clone()
+        };
+        let dir = file
+            .file_path
+            .strip_prefix(&root)
+            .with_context(|| format!("{} lies outside {root}", file.file_path))?;
+        let path = Path::new(dir.trim_start_matches('/')).join(&file.file_name);
+        if !path.components().all(|c| matches!(c, Component::Normal(_))) {
+            bail!("{} is no plain path", path.display());
+        }
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    /// What a frontend starts, or `None` when the files do not tell.
+    pub fn start(&self) -> Option<Start> {
+        if !self.has_multiple_files {
+            return Some(Start::File(self.files.first()?.file_name.clone()));
+        }
+        // RomM takes the extension from the folder name; `Game (v1.1)` yields `1)`.
+        let ext = &self.fs_extension;
+        if !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Some(Start::Folder);
+        }
+        let mut top: Vec<&str> = self
+            .files
+            .iter()
+            .filter(|f| self.relative_path(f).is_ok_and(|p| !p.contains('/')))
+            .map(|f| f.file_name.as_str())
+            .collect();
+        top.sort_unstable();
+        let with = |exts: &[&str]| -> Vec<&str> {
+            top.iter()
+                .copied()
+                .filter(|name| exts.contains(&extension(name).as_str()))
+                .collect()
+        };
+        for index in DISC_INDEXES {
+            if let Some(file) = with(&[index]).first() {
+                return Some(Start::File((*file).to_owned()));
+            }
+        }
+        let images = with(DISC_IMAGES);
+        match images.len() {
+            0 => {}
+            1 => return Some(Start::File(images[0].to_owned())),
+            _ => {
+                return Some(Start::Playlist(
+                    images.into_iter().map(String::from).collect(),
+                ));
+            }
+        }
+        let mut rest = top
+            .iter()
+            .filter(|name| !COMPANIONS.contains(&extension(name).as_str()));
+        match (rest.next(), rest.next()) {
+            (Some(file), None) => Some(Start::File((*file).to_owned())),
+            _ => None,
+        }
+    }
+}
+
+/// The lowercase extension of a file name; empty without one.
+fn extension(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, e)| e.to_lowercase())
+        .unwrap_or_default()
 }
 
 #[derive(Deserialize)]
@@ -156,14 +273,37 @@ impl Romm {
         self.get_json(&format!("/api/roms/{id}"))
     }
 
-    /// Downloads a game file to `dest`.
-    pub fn download_rom(&self, id: u64, fs_name: &str, dest: &Path) -> anyhow::Result<()> {
-        let path = format!("/api/roms/{id}/content/{}", percent_encode(fs_name));
-        let mut response = self.get(&path, None)?;
-        let mut file =
-            fs::File::create(dest).with_context(|| format!("creating {}", dest.display()))?;
-        io::copy(&mut response.body_mut().as_reader(), &mut file)
-            .with_context(|| format!("downloading {fs_name}"))?;
+    /// Downloads one file of a game to `dest`, continuing a partial download already there.
+    /// `progress` receives the size of `dest` as it grows.
+    pub fn download_file(
+        &self,
+        file: &RomFile,
+        dest: &Path,
+        progress: &dyn Fn(u64),
+    ) -> anyhow::Result<()> {
+        let path = format!(
+            "/api/roms/{}/files/content/{}",
+            file.id,
+            percent_encode(&file.file_name)
+        );
+        let have = fs::metadata(dest).map_or(0, |m| m.len());
+        let range = (have > 0).then(|| format!("bytes={have}-"));
+        let mut response = self.get(&path, None, range.as_deref())?;
+        // A server that ignores the range sends the whole file again.
+        let resumed = response.status().as_u16() == 206;
+        let out = if resumed {
+            fs::File::options().append(true).open(dest)
+        } else {
+            fs::File::create(dest)
+        }
+        .with_context(|| format!("opening {}", dest.display()))?;
+        let mut out = Counting {
+            out,
+            written: if resumed { have } else { 0 },
+            progress,
+        };
+        io::copy(&mut response.body_mut().as_reader(), &mut out)
+            .with_context(|| format!("downloading {}", file.file_name))?;
         Ok(())
     }
 
@@ -177,7 +317,7 @@ impl Romm {
         self.last_media.set(Some(Instant::now()));
         // The `?ts=` query only busts caches, and RomM puts unencoded spaces into it.
         let path = path.split('?').next().unwrap_or(path).replace(' ', "%20");
-        let mut response = self.get(&path, Some(API_BODY_TIMEOUT))?;
+        let mut response = self.get(&path, Some(API_BODY_TIMEOUT), None)?;
         let tmp = dest.with_extension("part");
         let mut file =
             fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
@@ -193,7 +333,7 @@ impl Romm {
     }
 
     fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let mut response = self.get(path, Some(API_BODY_TIMEOUT))?;
+        let mut response = self.get(path, Some(API_BODY_TIMEOUT), None)?;
         let text = response
             .body_mut()
             .with_config()
@@ -204,11 +344,12 @@ impl Romm {
     }
 
     /// GET with retries on transport errors, 429 and 5xx; other errors fail at once.
-    /// `body_timeout` limits the time to read the whole answer.
+    /// `body_timeout` limits the time to read the whole answer; `range` asks for part of it.
     fn get(
         &self,
         path: &str,
         body_timeout: Option<Duration>,
+        range: Option<&str>,
     ) -> anyhow::Result<Response<ureq::Body>> {
         let url = format!("{}{path}", self.base);
         let mut last_error = anyhow!("no request made");
@@ -216,10 +357,14 @@ impl Romm {
             if attempt > 0 {
                 thread::sleep(self.backoff * 2u32.pow(attempt - 1));
             }
-            match self
+            let mut request = self
                 .agent
                 .get(&url)
-                .header("Authorization", format!("Bearer {}", self.token))
+                .header("Authorization", format!("Bearer {}", self.token));
+            if let Some(range) = range {
+                request = request.header("Range", range);
+            }
+            match request
                 .config()
                 .timeout_recv_body(body_timeout)
                 .build()
@@ -238,6 +383,26 @@ impl Romm {
             }
         }
         Err(last_error)
+    }
+}
+
+/// Passes written data on to `out` and reports the running total.
+struct Counting<'a> {
+    out: fs::File,
+    written: u64,
+    progress: &'a dyn Fn(u64),
+}
+
+impl Write for Counting<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.out.write(buf)?;
+        self.written += n as u64;
+        (self.progress)(self.written);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.out.flush()
     }
 }
 

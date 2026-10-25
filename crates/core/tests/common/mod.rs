@@ -13,6 +13,7 @@ pub struct Request {
     /// Path including the query string.
     pub path: String,
     pub authorization: Option<String>,
+    pub range: Option<String>,
 }
 
 pub struct Response {
@@ -62,7 +63,7 @@ impl FakeServer {
                             return;
                         }
                         let path = line.split_whitespace().nth(1).unwrap_or("").to_owned();
-                        let mut authorization = None;
+                        let (mut authorization, mut range) = (None, None);
                         loop {
                             let mut header = String::new();
                             reader.read_line(&mut header).unwrap();
@@ -70,15 +71,19 @@ impl FakeServer {
                             if header.is_empty() {
                                 break;
                             }
-                            if let Some((name, value)) = header.split_once(':')
-                                && name.eq_ignore_ascii_case("authorization")
-                            {
-                                authorization = Some(value.trim().to_owned());
+                            if let Some((name, value)) = header.split_once(':') {
+                                let value = Some(value.trim().to_owned());
+                                if name.eq_ignore_ascii_case("authorization") {
+                                    authorization = value;
+                                } else if name.eq_ignore_ascii_case("range") {
+                                    range = value;
+                                }
                             }
                         }
                         let request = Request {
                             path,
                             authorization,
+                            range,
                         };
                         let response = handler(&request);
                         recorded.lock().unwrap().push(request);

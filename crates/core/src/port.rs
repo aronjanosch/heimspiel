@@ -2,6 +2,7 @@
 //! offered once the Library holds its Original.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use anyhow::{Context, bail};
 use serde::Deserialize;
@@ -269,6 +270,34 @@ pub fn entries(
         }
     }
     entries
+}
+
+/// Where a Port's Original is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OriginalLocation {
+    /// A game on the RomM server, by its id.
+    RomM(u64),
+    /// A Dump folder.
+    Dump(PathBuf),
+}
+
+/// Where the Original of `manifest` is: a matching RomM game in the Library, else an accepted Dump.
+pub fn original(
+    manifest: &Manifest,
+    library: &Library,
+    dumps: &[Dump],
+) -> Option<OriginalLocation> {
+    library
+        .entries
+        .iter()
+        .find_map(|e| romm_original(e, &manifest.original))
+        .map(OriginalLocation::RomM)
+        .or_else(|| {
+            dumps
+                .iter()
+                .find(|d| manifest.original.accepts(d))
+                .map(|d| OriginalLocation::Dump(d.path.clone()))
+        })
 }
 
 /// What `heimspiel ports` shows.

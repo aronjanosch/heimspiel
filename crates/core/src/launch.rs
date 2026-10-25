@@ -1,14 +1,22 @@
 //! `heimspiel launch`: install a Port, provision its Original, and run it. ES-DE waits for this
-//! command, so the Port runs in the foreground until it exits.
+//! command, so the Port runs in the foreground until it exits. `heimspiel check` does the same
+//! inside a wrapper such as a headless gamescope and only checks that the Port keeps running.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::ffi::OsStr;
+use std::fs;
+use std::os::unix::process::CommandExt;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 
 use crate::dump;
 use crate::fetch::Fetch;
+pub use crate::port::OriginalLocation;
 use crate::port::{Manifest, QuiverApp, Runner};
+use crate::process::stop;
 use crate::proton::Proton;
 use crate::provision::{self, Homes};
 use crate::quiver::{Install, Pin, Quiver};
@@ -28,15 +36,6 @@ pub struct PortLaunch<'a> {
     pub latest_version: &'a dyn Fn(&QuiverApp) -> anyhow::Result<String>,
 }
 
-/// Where the Port's Original is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OriginalLocation {
-    /// A game on the RomM server, by its id.
-    RomM(u64),
-    /// A Dump folder.
-    Dump(PathBuf),
-}
-
 /// Launches the Port `port_id` with its Original at `original`; `game` picks one of the Port's
 /// games, for Ports with several.
 pub fn run(
@@ -45,6 +44,88 @@ pub fn run(
     original: &OriginalLocation,
     game: Option<&str>,
 ) -> anyhow::Result<()> {
+    let mut command = prepare(ctx, port_id, original, game)?;
+    let log = ctx.quiver.open_log()?;
+    let status = command
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .process_group(0)
+        .status()
+        .with_context(|| format!("starting {port_id}"))?;
+    if !status.success() {
+        bail!(
+            "{port_id} ended with {status}; see {}",
+            ctx.quiver.log().display()
+        );
+    }
+    Ok(())
+}
+
+/// Installs and provisions like [`run`], then runs the Port inside `wrapper` (a command line that
+/// takes the Port's command after it) and checks that it is still running after `duration`; then
+/// stops it. The output goes to `log`. Sound through SDL is muted.
+pub fn check(
+    ctx: &PortLaunch,
+    port_id: &str,
+    original: &OriginalLocation,
+    game: Option<&str>,
+    wrapper: &[String],
+    duration: Duration,
+    log: &Path,
+) -> anyhow::Result<()> {
+    let command = prepare(ctx, port_id, original, game)?;
+    let mut wrapped = wrap(&command, wrapper);
+    let output = fs::File::create(log).with_context(|| format!("creating {}", log.display()))?;
+    let mut child = wrapped
+        .env("SDL_AUDIODRIVER", "dummy")
+        .stdin(Stdio::null())
+        .stdout(output.try_clone()?)
+        .stderr(output)
+        .process_group(0)
+        .spawn()
+        .with_context(|| format!("starting {}", wrapper.join(" ")))?;
+    let started = Instant::now();
+    while started.elapsed() < duration {
+        if let Some(status) = child.try_wait()? {
+            bail!(
+                "{port_id} ended after {} s with {status}; see {}",
+                started.elapsed().as_secs(),
+                log.display()
+            );
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    stop(&mut child);
+    Ok(())
+}
+
+/// `command` run by `wrapper`, keeping its environment and folder.
+fn wrap(command: &Command, wrapper: &[String]) -> Command {
+    let mut parts: Vec<&OsStr> = wrapper.iter().map(OsStr::new).collect();
+    parts.push(command.get_program());
+    parts.extend(command.get_args());
+    let mut wrapped = Command::new(parts[0]);
+    wrapped.args(&parts[1..]);
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => wrapped.env(key, value),
+            None => wrapped.env_remove(key),
+        };
+    }
+    if let Some(dir) = command.get_current_dir() {
+        wrapped.current_dir(dir);
+    }
+    wrapped
+}
+
+/// Installs the Port and provisions its Original; returns the command that runs it.
+fn prepare(
+    ctx: &PortLaunch,
+    port_id: &str,
+    original: &OriginalLocation,
+    game: Option<&str>,
+) -> anyhow::Result<Command> {
     let manifest = ctx
         .manifests
         .iter()
@@ -103,12 +184,12 @@ pub fn run(
                 .as_deref()
                 .context("the Manifest names no program to start")?;
             let program = ctx.quiver.app_dir(app).join(executable);
-            proton.run(
+            proton.command(
                 &program,
                 &ctx.quiver.prefix(app),
                 &format!("heimspiel-{}", app.name),
             )
         }
-        None => ctx.quiver.run(app),
+        None => Ok(ctx.quiver.run_command(app)),
     }
 }

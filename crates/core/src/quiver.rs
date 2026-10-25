@@ -215,17 +215,19 @@ impl Quiver {
         }
     }
 
-    /// Runs the app and waits until it exits.
-    pub fn run(&self, app: &QuiverApp) -> anyhow::Result<()> {
-        let status = self.spawn(&["--run", &app.name])?.wait()?;
-        if !status.success() {
-            bail!(
-                "{} ended with {status}; see {}",
-                app.name,
-                self.log().display()
-            );
-        }
-        Ok(())
+    /// The command that runs the app; it blocks until the app exits.
+    pub fn run_command(&self, app: &QuiverApp) -> Command {
+        let mut command = Command::new(self.appimage());
+        command.args(["--run", &app.name]).current_dir(&self.dir);
+        command
+    }
+
+    /// Where Quiver's own output goes, appended.
+    pub fn open_log(&self) -> anyhow::Result<fs::File> {
+        Ok(fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.log())?)
     }
 
     pub fn log(&self) -> PathBuf {
@@ -234,10 +236,7 @@ impl Quiver {
 
     /// Starts Quiver in a process group of its own, so it can be stopped with all its children.
     fn spawn(&self, args: &[&str]) -> anyhow::Result<Child> {
-        let log = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.log())?;
+        let log = self.open_log()?;
         Command::new(self.appimage())
             .args(args)
             .current_dir(&self.dir)

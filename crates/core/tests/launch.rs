@@ -81,7 +81,7 @@ fn fake_quiver(dir: &Path, installs: Installs) {
     };
     let script = format!(
         "#!/bin/sh\nhere=$(dirname \"$0\")\necho \"$@\" >> \"$here/calls.log\"\n\
-         case \"$1\" in\n  --download) {install}; exec sleep 600;;\n  --run) exit 0;;\nesac\n"
+         case \"$1\" in\n  --download) {install}; exec sleep 600;;\n  --run) [ -f \"$here/hangs\" ] && exec sleep 600; exit 0;;\nesac\n"
     );
     fs::create_dir_all(dir).unwrap();
     let path = dir.join("QuiverLauncher-linux-x64.AppImage");
@@ -135,6 +135,18 @@ fn launch_with(
     game: Option<&str>,
     install_timeout: Duration,
 ) -> anyhow::Result<()> {
+    with_ctx(s, server, manifest, install_timeout, |ctx| {
+        launch::run(ctx, &manifest.id, original, game)
+    })
+}
+
+fn with_ctx<T>(
+    s: &Setup,
+    server: &FakeServer,
+    manifest: &Manifest,
+    install_timeout: Duration,
+    f: impl FnOnce(&PortLaunch) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     let client = Romm::new(&server.url, "rmm_secret").backoff(Duration::ZERO);
     let cache = GameCache::new(&s.tmp.path().join("cache"), 1 << 30);
     let fetch = Fetch {
@@ -172,7 +184,7 @@ fn launch_with(
         install_timeout,
         latest_version: &|_| Ok("1.0".into()),
     };
-    launch::run(&ctx, &manifest.id, original, game)
+    f(&ctx)
 }
 
 fn calls(s: &Setup) -> Vec<String> {
@@ -432,4 +444,49 @@ fn refuses_a_dump_the_port_does_not_accept() {
 
     assert!(format!("{err:#}").contains("eboot.bin"), "{err:#}");
     assert!(calls(&s).is_empty());
+}
+
+fn check(s: &Setup, server: &FakeServer, seconds: u64) -> anyhow::Result<()> {
+    let manifest = manifest();
+    let log = s.tmp.path().join("check.log");
+    // `env` stands in for gamescope: it runs the command it is given.
+    with_ctx(s, server, &manifest, Duration::from_secs(20), |ctx| {
+        launch::check(
+            ctx,
+            &manifest.id,
+            &OriginalLocation::RomM(7),
+            None,
+            &["env".to_owned()],
+            Duration::from_secs(seconds),
+            &log,
+        )
+    })
+}
+
+#[test]
+fn checks_that_a_port_keeps_running_and_stops_it() {
+    let s = setup(Installs::Always);
+    fs::write(s.quiver_dir.join("hangs"), "").unwrap();
+    let server = romm();
+    let started = Instant::now();
+
+    check(&s, &server, 1).unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(calls(&s), ["--download TestRecomp", "--run TestRecomp"]);
+    assert!(
+        s.config_home
+            .join("TestRecompiled/test.n64.us.1.0.z64")
+            .is_file()
+    );
+}
+
+#[test]
+fn fails_the_check_of_a_port_that_ends_at_once() {
+    let s = setup(Installs::Always);
+    let server = romm();
+
+    let err = check(&s, &server, 5).unwrap_err();
+
+    assert!(format!("{err:#}").contains("ended"), "{err:#}");
 }

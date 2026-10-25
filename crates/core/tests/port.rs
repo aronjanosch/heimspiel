@@ -7,7 +7,7 @@ use heimspiel_core::dump;
 use heimspiel_core::library::{
     Entry, FileLocation, Identity, Launch, Library, Metadata, SourceKind,
 };
-use heimspiel_core::port::{self, Manifest, Provide};
+use heimspiel_core::port::{self, Manifest, OriginalLocation, Provide};
 
 const MANIFEST: &str = r#"
 id = "zelda64recomp"
@@ -284,4 +284,26 @@ fn finds_catalog_ports_for_dumps_too() {
         Some("Test Collection™ (Dump CUSA02320)")
     );
     assert_eq!(overview.more[0].original, "Test Collection™");
+}
+
+#[test]
+fn finds_where_a_ports_original_is() {
+    let zelda = Manifest::parse(MANIFEST).unwrap();
+    let collection = Manifest::parse(COLLECTION).unwrap();
+    let library = Library {
+        entries: vec![romm(3037, 1030, "USA", None)],
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let path = common::ps4_dump(tmp.path(), "CUSA02320", &["eboot.bin", "u1data"]);
+    let dumps = dump::dumps(&[tmp.path().to_path_buf()]).unwrap();
+
+    assert_eq!(
+        port::original(&zelda, &library, &dumps),
+        Some(OriginalLocation::RomM(3037))
+    );
+    assert_eq!(
+        port::original(&collection, &library, &dumps),
+        Some(OriginalLocation::Dump(path))
+    );
+    assert_eq!(port::original(&collection, &library, &[]), None);
 }

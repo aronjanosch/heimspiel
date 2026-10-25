@@ -3,11 +3,10 @@
 //! the chosen `.exe` (docs/research/2026-10-24-uncharted.md), and passes no environment of ours.
 
 use std::fs;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 
 /// One Proton installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,11 +51,13 @@ pub fn find(steam_root: &Path) -> Option<Proton> {
 }
 
 impl Proton {
-    /// Runs the Windows `program` in the prefix `prefix` (Proton's compat data folder) and waits
-    /// until it and everything it started have exited. `id` names the game towards Proton.
-    pub fn run(&self, program: &Path, prefix: &Path, id: &str) -> anyhow::Result<()> {
+    /// The command that runs the Windows `program` in the prefix `prefix` (Proton's compat data
+    /// folder); it blocks until the program and everything it started have exited. `id` names
+    /// the game towards Proton.
+    pub fn command(&self, program: &Path, prefix: &Path, id: &str) -> anyhow::Result<Command> {
         fs::create_dir_all(prefix).with_context(|| format!("creating {}", prefix.display()))?;
-        let status = Command::new(&self.exe)
+        let mut command = Command::new(&self.exe);
+        command
             .arg("waitforexitandrun")
             .arg(program)
             .current_dir(program.parent().unwrap_or(Path::new("/")))
@@ -65,15 +66,8 @@ impl Proton {
             .env("SteamGameId", id)
             // Xalia, Proton's controller helper for launcher windows, crashed on the Uncharted
             // launcher; the Ports start straight into their games.
-            .env("PROTON_USE_XALIA", "0")
-            .stdin(Stdio::null())
-            .process_group(0)
-            .status()
-            .with_context(|| format!("starting {}", self.exe.display()))?;
-        if !status.success() {
-            bail!("{} ended with {status}", program.display());
-        }
-        Ok(())
+            .env("PROTON_USE_XALIA", "0");
+        Ok(command)
     }
 }
 

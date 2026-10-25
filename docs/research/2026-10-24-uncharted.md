@@ -63,6 +63,14 @@ From the Quiver 3.5.1 source (`~/.cache/heimspiel-tests/dl/quiver-src`):
   `Apps/<folder>/selected_executable.txt` holds the absolute path of one (`Services/CLIHandler.cs:381-420`,
   `Models/GameInfo.cs:1342-1375`). Any existing file with an extension counts as valid on Linux
   (`GameInstallationService.cs:1504-1513`).
+- Quiver's extraction leaves `run.py` (a script with `#!/usr/bin/env python3` and CRLF line ends)
+  executable. On Linux, `FindExecutableCandidates` lists `.exe` files only when no file looks like a native
+  program, and the launch uses the first candidate when the noted one is not among them
+  (`lib/QuiverLauncher.Core/Services/GameInstallationService.cs`, `Services/GameLaunchService.cs:36-77`). The
+  second launch from ES-DE therefore ran `run.py` and failed with "env: ‘python3\r’: No such file or
+  directory" although `selected_executable.txt` named `Play Uncharted.exe` (`launch-debug.log`:
+  `chosenExecutable=…/run.py`). heimspiel clears the executable bit of the other top-level files of a
+  Windows Port.
 - Proton creates a prefix around files that already exist: `copy_pfx` only creates missing directories and
   files (`proton`, `setup_prefix` and `copy_pfx`). heimspiel can therefore write `settings.json` into
   `pfx/drive_c/users/steamuser/AppData/Roaming/` before the first start.

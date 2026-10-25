@@ -179,12 +179,27 @@ impl Quiver {
     }
 
     /// Notes the Manifest's program in `selected_executable.txt`; without the note Quiver's CLI
-    /// refuses to run a release with several programs.
+    /// refuses to run a release with several programs. For a Windows Port it also clears the
+    /// executable bit of the other files at the top of the app folder: Quiver prefers anything that
+    /// looks like a Linux program (Uncharted's `run.py`, executable after unpacking) over the `.exe`
+    /// files, even over the noted one (`GameInstallationService.FindExecutableCandidates`).
     pub fn select_executable(&self, app: &QuiverApp) -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
         let Some(executable) = &app.executable else {
             return Ok(());
         };
         let folder = self.dir.join("Apps").join(&app.name);
+        if let Some(Runner::Proton) = app.runner {
+            for file in fs::read_dir(&folder)? {
+                let path = file?.path();
+                let mut permissions = fs::metadata(&path)?.permissions();
+                let mode = permissions.mode();
+                if path.is_file() && mode & 0o111 != 0 && !path.ends_with(executable) {
+                    permissions.set_mode(mode & !0o111);
+                    fs::set_permissions(&path, permissions)?;
+                }
+            }
+        }
         let program = folder.join(executable);
         if !program.is_file() {
             bail!("{} has no {executable}", folder.display());

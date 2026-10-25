@@ -348,6 +348,10 @@ fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
     fs::create_dir_all(s.quiver_dir.join("release")).unwrap();
     fs::write(s.quiver_dir.join("release/Play.exe"), b"MZ").unwrap();
     fs::write(s.quiver_dir.join("release/Launcher.exe"), b"MZ").unwrap();
+    // Quiver prefers any program that looks native over the .exe files, even over the one noted.
+    let script = s.quiver_dir.join("release/run.py");
+    fs::write(&script, "#!/usr/bin/env python3\r\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     let dump = common::ps4_dump(s.tmp.path(), "CUSA02320", &["eboot.bin"]);
     let server = romm();
 
@@ -371,6 +375,11 @@ fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
         fs::read_to_string(app.join("selected_executable.txt")).unwrap(),
         app.join("Play.exe").to_string_lossy()
     );
+    let mode = fs::metadata(app.join("run.py"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o111, 0, "{mode:o}");
     let apps: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(s.quiver_dir.join("apps.json")).unwrap()).unwrap();
     let entry = &apps["apps"][0];

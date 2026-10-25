@@ -8,13 +8,16 @@ use anyhow::{Context, bail};
 
 use crate::dump;
 use crate::fetch::Fetch;
-use crate::port::{Manifest, QuiverApp};
+use crate::port::{Manifest, QuiverApp, Runner};
+use crate::proton::Proton;
 use crate::provision::{self, Homes};
 use crate::quiver::{Install, Pin, Quiver};
 
 pub struct PortLaunch<'a> {
     pub manifests: &'a [Manifest],
     pub quiver: &'a Quiver,
+    /// Runs the Windows builds of Ports.
+    pub proton: Option<&'a Proton>,
     /// Access to RomM, for Ports whose Original is there.
     pub fetch: Option<&'a Fetch<'a>>,
     pub notify: &'a dyn Fn(&str),
@@ -76,7 +79,6 @@ pub fn run(
             }
         }
     }
-    ctx.quiver.select_executable(app)?;
     match original {
         OriginalLocation::RomM(rom_id) => {
             let fetch = ctx
@@ -91,5 +93,22 @@ pub fn run(
             provision::provide_dump(&manifest.provide, &ctx.quiver.prefix(app), path, game)?;
         }
     }
-    ctx.quiver.run(app)
+    match app.runner {
+        Some(Runner::Proton) => {
+            let proton = ctx.proton.context(
+                "this Port is a Windows build and needs Proton; install it through Steam",
+            )?;
+            let executable = app
+                .executable
+                .as_deref()
+                .context("the Manifest names no program to start")?;
+            let program = ctx.quiver.app_dir(app).join(executable);
+            proton.run(
+                &program,
+                &ctx.quiver.prefix(app),
+                &format!("heimspiel-{}", app.name),
+            )
+        }
+        None => ctx.quiver.run(app),
+    }
 }

@@ -45,7 +45,7 @@ pub struct QuiverApp {
     /// How a Windows build runs on Linux; native builds have none.
     #[serde(default)]
     pub runner: Option<Runner>,
-    /// The program to start, for releases with several; a path inside the release.
+    /// The Windows program heimspiel starts under Proton; a path inside the release.
     #[serde(default)]
     pub executable: Option<String>,
 }

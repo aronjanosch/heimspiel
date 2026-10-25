@@ -13,6 +13,7 @@ pub mod library;
 pub mod output;
 pub mod port;
 mod process;
+pub mod proton;
 pub mod provision;
 pub mod quiver;
 pub mod romm;

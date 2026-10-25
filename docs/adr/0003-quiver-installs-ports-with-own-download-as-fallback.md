@@ -18,3 +18,6 @@ the game exits.
   first Uncharted failure, docs/research/2026-10-24-uncharted.md). heimspiel pins the catalog's verified
   version for those and the newest GitHub release for the rest, so a catalog app may get an older release
   than GitHub's newest. Quiver's auto update stays off; updating Ports is heimspiel's job.
+- Windows Ports are launched by heimspiel with `proton waitforexitandrun`, not with `quiver --run`: Quiver
+  starts any file in the release that begins with `#!/` natively instead of the chosen `.exe` (Uncharted's
+  `run.py`), and passes no environment of heimspiel's. Quiver still installs them.

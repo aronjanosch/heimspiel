@@ -184,7 +184,8 @@ pub fn read_token(path: &Path) -> anyhow::Result<String> {
     Ok(token)
 }
 
-fn steam_root(config: &Config, user_home: &Path) -> Option<PathBuf> {
+/// The Steam installation: the configured one, else the first of the usual places.
+pub fn steam_root(config: &Config, user_home: &Path) -> Option<PathBuf> {
     if let Some(root) = &config.steam.root {
         return Some(expand(root, user_home));
     }

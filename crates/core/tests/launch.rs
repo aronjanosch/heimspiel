@@ -10,6 +10,7 @@ use heimspiel_core::cache::GameCache;
 use heimspiel_core::fetch::Fetch;
 use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
 use heimspiel_core::port::Manifest;
+use heimspiel_core::proton::Proton;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::Quiver;
 use heimspiel_core::romm::Romm;
@@ -147,9 +148,24 @@ fn launch_with(
         config: s.config_home.clone(),
         data: s.tmp.path().join("data"),
     };
+    // A stand-in for Proton: logs its arguments and the environment it was given.
+    let proton_dir = s.tmp.path().join("proton");
+    fs::create_dir_all(&proton_dir).unwrap();
+    let proton_exe = proton_dir.join("proton");
+    fs::write(
+        &proton_exe,
+        "#!/bin/sh\n{ echo \"$@\"; env | grep -E '^(STEAM_COMPAT|PROTON|SteamGameId)' | sort; } > \"$(dirname \"$0\")/calls.log\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&proton_exe, fs::Permissions::from_mode(0o755)).unwrap();
+    let proton = Proton {
+        exe: proton_exe,
+        steam_root: s.tmp.path().join("steam"),
+    };
     let ctx = PortLaunch {
         manifests: std::slice::from_ref(manifest),
         quiver: &quiver,
+        proton: Some(&proton),
         fetch: Some(&fetch),
         notify: &|_| {},
         homes: &homes,
@@ -348,10 +364,12 @@ fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
     fs::create_dir_all(s.quiver_dir.join("release")).unwrap();
     fs::write(s.quiver_dir.join("release/Play.exe"), b"MZ").unwrap();
     fs::write(s.quiver_dir.join("release/Launcher.exe"), b"MZ").unwrap();
-    // Quiver prefers any program that looks native over the .exe files, even over the one noted.
-    let script = s.quiver_dir.join("release/run.py");
-    fs::write(&script, "#!/usr/bin/env python3\r\n").unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    // Quiver's --run would start this script natively instead of any .exe file.
+    fs::write(
+        s.quiver_dir.join("release/run.py"),
+        "#!/usr/bin/env python3\r\n",
+    )
+    .unwrap();
     let dump = common::ps4_dump(s.tmp.path(), "CUSA02320", &["eboot.bin"]);
     let server = romm();
 
@@ -365,26 +383,29 @@ fn runs_a_windows_port_under_proton_with_the_dump_and_game_chosen() {
     )
     .unwrap();
 
-    assert_eq!(
-        calls(&s),
-        ["--download TestCollection", "--run TestCollection"]
-    );
+    // Quiver installs; heimspiel runs the Manifest's program under Proton itself.
+    assert_eq!(calls(&s), ["--download TestCollection"]);
     let app = s.quiver_dir.join("Apps/TestCollection");
-    // With several programs in the release, Quiver's CLI runs only the one noted here.
+    let prefix = s.quiver_dir.join("Prefixes/TestCollection");
+    let proton = fs::read_to_string(s.tmp.path().join("proton/calls.log")).unwrap();
     assert_eq!(
-        fs::read_to_string(app.join("selected_executable.txt")).unwrap(),
-        app.join("Play.exe").to_string_lossy()
+        proton.lines().collect::<Vec<_>>(),
+        [
+            format!("waitforexitandrun {}", app.join("Play.exe").display()),
+            "PROTON_USE_XALIA=0".to_owned(),
+            format!(
+                "STEAM_COMPAT_CLIENT_INSTALL_PATH={}",
+                s.tmp.path().join("steam").display()
+            ),
+            format!("STEAM_COMPAT_DATA_PATH={}", prefix.display()),
+            "SteamGameId=heimspiel-TestCollection".to_owned(),
+        ]
     );
-    let mode = fs::metadata(app.join("run.py"))
-        .unwrap()
-        .permissions()
-        .mode();
-    assert_eq!(mode & 0o111, 0, "{mode:o}");
     let apps: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(s.quiver_dir.join("apps.json")).unwrap()).unwrap();
     let entry = &apps["apps"][0];
     assert_eq!(entry["linuxRunner"], "proton");
-    let prefix = PathBuf::from(entry["linuxPrefixPath"].as_str().unwrap());
+    assert_eq!(entry["linuxPrefixPath"], prefix.to_string_lossy().as_ref());
     let settings = fs::read_to_string(
         prefix.join("pfx/drive_c/users/steamuser/AppData/Roaming/test-launcher/settings.json"),
     )

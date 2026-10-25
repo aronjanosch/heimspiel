@@ -123,8 +123,8 @@ impl Quiver {
             "autoUpdate": false,
         });
         if let Some(Runner::Proton) = app.runner {
-            // Quiver would otherwise pick its runner itself and keep the prefix inside the app
-            // folder; heimspiel needs to know where it is to provision the Original into it.
+            // heimspiel runs Windows Ports under Proton itself; this keeps Quiver's own launch
+            // (from its window) on the same prefix.
             entry["linuxRunner"] = "proton".into();
             entry["linuxPrefixPath"] = self.prefix(app).to_string_lossy().into();
         }
@@ -173,43 +173,14 @@ impl Quiver {
             .map(str::to_owned)
     }
 
+    /// The folder Quiver installs the app into.
+    pub fn app_dir(&self, app: &QuiverApp) -> PathBuf {
+        self.dir.join("Apps").join(&app.name)
+    }
+
     /// The Proton prefix (Proton's compat data folder) of a Windows Port.
     pub fn prefix(&self, app: &QuiverApp) -> PathBuf {
         self.dir.join("Prefixes").join(&app.name)
-    }
-
-    /// Notes the Manifest's program in `selected_executable.txt`; without the note Quiver's CLI
-    /// refuses to run a release with several programs. For a Windows Port it also clears the
-    /// executable bit of the other files at the top of the app folder: Quiver prefers anything that
-    /// looks like a Linux program (Uncharted's `run.py`, executable after unpacking) over the `.exe`
-    /// files, even over the noted one (`GameInstallationService.FindExecutableCandidates`).
-    pub fn select_executable(&self, app: &QuiverApp) -> anyhow::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-        let Some(executable) = &app.executable else {
-            return Ok(());
-        };
-        let folder = self.dir.join("Apps").join(&app.name);
-        if let Some(Runner::Proton) = app.runner {
-            for file in fs::read_dir(&folder)? {
-                let path = file?.path();
-                let mut permissions = fs::metadata(&path)?.permissions();
-                let mode = permissions.mode();
-                if path.is_file() && mode & 0o111 != 0 && !path.ends_with(executable) {
-                    permissions.set_mode(mode & !0o111);
-                    fs::set_permissions(&path, permissions)?;
-                }
-            }
-        }
-        let program = folder.join(executable);
-        if !program.is_file() {
-            bail!("{} has no {executable}", folder.display());
-        }
-        let note = folder.join("selected_executable.txt");
-        let text = program.to_string_lossy();
-        if fs::read_to_string(&note).is_ok_and(|n| n == text) {
-            return Ok(());
-        }
-        fs::write(&note, text.as_bytes()).with_context(|| format!("writing {}", note.display()))
     }
 
     pub fn is_installed(&self, app: &QuiverApp) -> bool {

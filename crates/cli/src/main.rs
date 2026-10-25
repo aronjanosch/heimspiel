@@ -11,6 +11,7 @@ use heimspiel_core::fetch::Fetch;
 use heimspiel_core::hook;
 use heimspiel_core::launch::{self, OriginalLocation, PortLaunch};
 use heimspiel_core::port;
+use heimspiel_core::proton;
 use heimspiel_core::provision::Homes;
 use heimspiel_core::quiver::{self, Quiver};
 use heimspiel_core::romm::Romm;
@@ -130,9 +131,11 @@ fn main() -> anyhow::Result<()> {
                 config: base("XDG_CONFIG_HOME", ".config"),
                 data: base("XDG_DATA_HOME", ".local/share"),
             };
+            let proton = sync::steam_root(&config, &user_home).and_then(|root| proton::find(&root));
             let ctx = PortLaunch {
                 manifests: &port::builtin(),
                 quiver: &quiver,
+                proton: proton.as_ref(),
                 fetch: fetch.as_ref(),
                 notify: &notify,
                 homes: &homes,

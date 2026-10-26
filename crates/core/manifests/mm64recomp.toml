@@ -1,0 +1,21 @@
+# Mega Man 64: Recompiled (MegaMan64Recomp/MegaMan64Recompiled, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp and include/zelda_config.h (v0.9.1): program_id "MegaMan64Recompiled",
+# game_id "megaman.n64.us.1.0", rom_hash 0x0c74c7489d01643b (USA); matches the USA ROM in RomM.
+id = "mm64recomp"
+title = "Mega Man 64: Recompiled"
+
+[quiver]
+name = "MegaMan64Recompiled"
+repository = "MegaMan64Recomp/MegaMan64Recompiled"
+asset-filter = "Linux-X64.zip"
+
+[original]
+platform = "n64"
+igdb-id = 10614
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "MegaMan64Recompiled"
+game-id = "megaman.n64.us.1.0"
+xxh3 = "0x0C74C7489D01643B"

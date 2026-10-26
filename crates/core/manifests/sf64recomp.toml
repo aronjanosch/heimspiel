@@ -1,0 +1,21 @@
+# Starfox 64: Recompiled (sonicdcer/Starfox64Recomp, GPL-3.0), an N64Recomp port of Star Fox 64.
+# librecomp facts from src/main/main.cpp and include/zelda_config.h (1.0.3): program_id "Starfox64Recompiled",
+# game_id "sf64.n64.us.1.1", rom_hash 0x163fd3fc3813f54e (USA 1.1, Rev A); matches the USA Rev A ROM in RomM.
+id = "sf64recomp"
+title = "Starfox 64: Recompiled"
+
+[quiver]
+name = "Starfox64Recompiled"
+repository = "sonicdcer/Starfox64Recomp"
+asset-filter = "Linux-X64-Release"
+
+[original]
+platform = "n64"
+igdb-id = 2591
+releases = [{ region = "USA", revision = "A" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "Starfox64Recompiled"
+game-id = "sf64.n64.us.1.1"
+xxh3 = "0x163FD3FC3813F54E"

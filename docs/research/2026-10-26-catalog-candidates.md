@@ -3,11 +3,14 @@
 `heimspiel ports` on the test setup lists 45 games the user owns that have a Port with a release in
 awesome-decomp-games (`data/games.json`), beyond the nine Manifests. For each, the newest GitHub release's
 assets were listed (`gh api repos/<repo>/releases`) and, for N64Recomp Ports, `src/main/main.cpp` was read for
-librecomp's `GameEntry`. ROM hashes were **not** yet checked against the user's ROMs.
+librecomp's `GameEntry`, and the user's ROMs were fetched from RomM, converted to big-endian, padded and
+hashed (XXH3-64 with `xxh3sum -H3`, SHA-1).
 
 ## Ready for the `librecomp` kind
 
-A `GameEntry` with `rom_hash` (XXH3-64 of the big-endian ROM) and `game_id`, and a Linux x64 release asset:
+A `GameEntry` with `rom_hash` (XXH3-64 of the big-endian ROM) and `game_id`, and a Linux x64 release asset.
+**All eight match the user's USA ROMs** (Star Fox 64: Rev A) and have Manifests now; the config folder is
+`~/.config/<program_id>` as for the earlier librecomp Ports:
 
 | Game | Repository | Release | Linux asset | `game_id` | `rom_hash` |
 |---|---|---|---|---|---|
@@ -18,10 +21,13 @@ A `GameEntry` with `rom_hash` (XXH3-64 of the big-endian ROM) and `game_id`, and
 | Snowboard Kids | cdlewis/snowboardkids-recomp | v1.0.6 | `SnowboardKidsRecompiled-Linux-X64.tar.gz` | `snowboardkids.n64.us` | `0xf384619787b78d4b` |
 | Snowboard Kids 2 | cdlewis/snowboardkids2-recomp | v2.0.2 | `SnowboardKids2Recompiled-Linux-X64.tar.gz` | `snowboardkids2.n64.us` | `0x81f434ff431162eb` |
 | Space Station Silicon Valley | Cellenseres/SSSV_Recomp | v0.2.0 | `SSSVRecompiled_v0.2.0_Linux.tar.gz` | `sssv.n64.us.1.0` | `0x912A068AADB0D0C5` |
-| Castlevania: Legacy of Darkness | fliperama86/cvlod_recomp | v0.2.29 | `LodRecomp-v0.2.29-linux-x64.tar.gz` | `castlevania2.n64.us` | constant `lod::target_rom::kXxh3_64`, not yet read |
+| Castlevania: Legacy of Darkness | fliperama86/cvlod_recomp | v0.2.29 | `LodRecomp-v0.2.29-linux-x64.tar.gz` | `castlevania2.n64.us` | `0x0BF827D4AC27A631` (`include/lod/target_rom.hpp`) |
 
-Version names put in asset names (Mega Man, DNZH, SSSV, Castlevania) change with every release; a Manifest
-needs a pattern, or a pin, for them. Star Fox 64 expects the US 1.1 ROM.
+Asset filters avoid the version in the name. Castlevania uses the glob `*linux-x64.tar.gz`: a plain filter
+matches anywhere in the name and would also pick the `.sha256` file
+(`lib/QuiverLauncher.Core/Services/RepositorySourceHelper.cs:89-102`). program_id per Port: `Starfox64Recompiled`,
+`Goemon64Recompiled`, `MegaMan64Recompiled`, `DNZHRecompiled`, `SnowboardKidsRecompiled`,
+`SnowboardKids2Recompiled`, `SSSVRecompiled`, `LodRecomp`. None was started yet.
 
 ## Linux release, but not plain librecomp
 

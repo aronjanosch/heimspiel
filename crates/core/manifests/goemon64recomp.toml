@@ -1,0 +1,21 @@
+# Goemon 64: Recompiled (klorfmorf/Goemon64Recomp, GPL-3.0), an N64Recomp port of Mystical Ninja Starring Goemon.
+# librecomp facts from src/main/main.cpp and include/goemon_config.h (v0.2.0-dev): program_id
+# "Goemon64Recompiled", game_id "mnsg.us", rom_hash 0xdb1bc7ee0e6beba1 (USA); matches the USA ROM in RomM.
+id = "goemon64recomp"
+title = "Goemon 64: Recompiled"
+
+[quiver]
+name = "Goemon64Recompiled"
+repository = "klorfmorf/Goemon64Recomp"
+asset-filter = "Linux-X64-Release"
+
+[original]
+platform = "n64"
+igdb-id = 3545
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "Goemon64Recompiled"
+game-id = "mnsg.us"
+xxh3 = "0xDB1BC7EE0E6BEBA1"

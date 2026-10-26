@@ -1,0 +1,22 @@
+# Snowboard Kids: Recompiled (cdlewis/snowboardkids-recomp, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp and include/zelda_config.h (v1.0.6): program_id
+# "SnowboardKidsRecompiled", game_id "snowboardkids.n64.us", rom_hash 0xf384619787b78d4b (USA); matches the
+# USA ROM in RomM.
+id = "sbkrecomp"
+title = "Snowboard Kids: Recompiled"
+
+[quiver]
+name = "SnowboardKidsRecompiled"
+repository = "cdlewis/snowboardkids-recomp"
+asset-filter = "Linux-X64.tar.gz"
+
+[original]
+platform = "n64"
+igdb-id = 3342
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "SnowboardKidsRecompiled"
+game-id = "snowboardkids.n64.us"
+xxh3 = "0xF384619787B78D4B"

@@ -1,0 +1,21 @@
+# Duke Nukem Zero Hour: Recompiled (sonicdcer/DNZHRecomp, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp and include/zelda_config.h (0.0.3): program_id "DNZHRecompiled",
+# game_id "dnzh.us", rom_hash 0xafc33da7101fec88 (USA retail); matches the USA ROM in RomM.
+id = "dnzhrecomp"
+title = "Duke Nukem Zero Hour: Recompiled"
+
+[quiver]
+name = "DNZHRecompiled"
+repository = "sonicdcer/DNZHRecomp"
+asset-filter = "Linux-X64-Release"
+
+[original]
+platform = "n64"
+igdb-id = 8503
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "DNZHRecompiled"
+game-id = "dnzh.us"
+xxh3 = "0xAFC33DA7101FEC88"

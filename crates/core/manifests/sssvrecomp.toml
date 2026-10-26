@@ -1,0 +1,21 @@
+# Space Station Silicon Valley: Recompiled (Cellenseres/SSSV_Recomp), an N64Recomp port.
+# librecomp facts from src/main/main.cpp and include/sssv_config.h (v0.2.0): program_id "SSSVRecompiled",
+# game_id "sssv.n64.us.1.0", rom_hash 0x912a068aadb0d0c5 (USA); matches the USA ROM in RomM.
+id = "sssvrecomp"
+title = "Space Station Silicon Valley: Recompiled"
+
+[quiver]
+name = "SSSVRecompiled"
+repository = "Cellenseres/SSSV_Recomp"
+asset-filter = "_Linux.tar.gz"
+
+[original]
+platform = "n64"
+igdb-id = 3602
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "SSSVRecompiled"
+game-id = "sssv.n64.us.1.0"
+xxh3 = "0x912A068AADB0D0C5"

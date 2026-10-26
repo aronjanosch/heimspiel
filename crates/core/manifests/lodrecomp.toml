@@ -1,0 +1,22 @@
+# Castlevania: Legacy of Darkness Recompiled (fliperama86/cvlod_recomp, GPL-3.0), an N64Recomp port.
+# librecomp facts from src/main/main.cpp, include/zelda_config.h and include/lod/target_rom.hpp (v0.2.29):
+# program_id "LodRecomp", game_id "castlevania2.n64.us", rom_hash 0x0bf827d4ac27a631 (USA); matches the USA
+# ROM in RomM. The glob keeps Quiver off the release's .sha256 file.
+id = "lodrecomp"
+title = "Castlevania: Legacy of Darkness Recompiled"
+
+[quiver]
+name = "LodRecomp"
+repository = "fliperama86/cvlod_recomp"
+asset-filter = "*linux-x64.tar.gz"
+
+[original]
+platform = "n64"
+igdb-id = 1131
+releases = [{ region = "USA" }]
+
+[provide]
+kind = "librecomp"
+config-dir = "LodRecomp"
+game-id = "castlevania2.n64.us"
+xxh3 = "0x0BF827D4AC27A631"

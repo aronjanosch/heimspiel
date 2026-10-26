@@ -1,5 +1,6 @@
 //! Local folders laid out like RomM's library: `<folder>/<platform>/<game file>`, with RomM's
-//! platform slugs as folder names.
+//! platform slugs as folder names. A game of several files, such as a disc image with its tracks,
+//! has a folder of its own: `<folder>/<platform>/<game>/<files>`.
 //!
 //! N64 ROMs are hashed, so Ports can recognise their Originals without an IGDB id. The hashes are
 //! kept in `hash_cache` and a file is only read again when its size or modification time changed.
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::library::{Entry, FileLocation, Identity, Launch, Metadata, RomHashes, SourceKind};
 use crate::n64;
 use crate::source::romm::is_game;
+use crate::start;
 
 pub fn entries(folders: &[PathBuf], hash_cache: &Path) -> anyhow::Result<Vec<Entry>> {
     let mut known = HashCache::load(hash_cache);
@@ -32,11 +34,21 @@ pub fn entries(folders: &[PathBuf], hash_cache: &Path) -> anyhow::Result<Vec<Ent
             for file in fs::read_dir(platform.path())? {
                 let file = file?;
                 let name = file.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') || !file.file_type()?.is_file() || !is_game(&name) {
+                let path = file.path();
+                if name.starts_with('.') {
                     continue;
                 }
-                let path = file.path();
-                let rom = if slug == "n64" {
+                let (location, file_name) = if path.is_dir() {
+                    match game_folder(&path, &name)? {
+                        Some(found) => found,
+                        None => continue,
+                    }
+                } else if path.is_file() && is_game(&name) {
+                    (FileLocation::Local { path: path.clone() }, name.clone())
+                } else {
+                    continue;
+                };
+                let rom = if slug == "n64" && path.is_file() {
                     let hashed = known.take_or_hash(&path);
                     let rom = hashed.as_ref().and_then(|h| h.rom.clone());
                     seen.0.extend(hashed.map(|h| (path.clone(), h)));
@@ -50,8 +62,8 @@ pub fn entries(folders: &[PathBuf], hash_cache: &Path) -> anyhow::Result<Vec<Ent
                     title: title(&name),
                     launch: Launch::File {
                         platform: slug.clone(),
-                        file_name: name,
-                        location: FileLocation::Local { path },
+                        file_name,
+                        location,
                     },
                     cover: None,
                     metadata: Metadata::default(),
@@ -67,6 +79,27 @@ pub fn entries(folders: &[PathBuf], hash_cache: &Path) -> anyhow::Result<Vec<Ent
     let _ = seen.save(hash_cache);
     entries.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(entries)
+}
+
+/// The game of several files in `path` and the name it is shown under, or `None` for a folder
+/// that holds no game, such as one of artwork.
+fn game_folder(path: &Path, name: &str) -> anyhow::Result<Option<(FileLocation, String)>> {
+    let mut top = Vec::new();
+    for file in fs::read_dir(path).with_context(|| format!("reading {}", path.display()))? {
+        let file = file?;
+        let name = file.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.') && file.path().is_file() {
+            top.push(name);
+        }
+    }
+    let top: Vec<&str> = top.iter().map(String::as_str).collect();
+    let Some(start) = start::of(name, &top) else {
+        return Ok(None);
+    };
+    Ok(start.name(name).map(|file_name| {
+        let path = path.to_path_buf();
+        (FileLocation::LocalFolder { path, start }, file_name)
+    }))
 }
 
 /// ROM hashes of earlier runs, by path.

@@ -15,6 +15,8 @@ use serde::Deserialize;
 use ureq::Agent;
 use ureq::http::Response;
 
+use crate::start::{self, Start};
+
 const API_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct Romm {
@@ -84,10 +86,6 @@ pub struct RomDetail {
     pub id: u64,
     /// The game's file, or its folder for games made of several files.
     pub fs_name: String,
-    /// Extension of `fs_name`; for a folder such as `Day of the Tentacle.svm` it marks a folder
-    /// that emulators open as a whole.
-    #[serde(default)]
-    pub fs_extension: String,
     /// The server folder holding `fs_name`, e.g. `roms/dc`.
     pub fs_path: String,
     pub name: String,
@@ -105,29 +103,6 @@ pub struct RomFile {
     pub file_path: String,
     pub file_size_bytes: u64,
 }
-
-/// What a frontend starts of a game.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Start {
-    /// This file, relative to the game's folder.
-    File(String),
-    /// These discs, in this order, through a playlist (`.m3u`) that heimspiel writes.
-    Playlist(Vec<String>),
-    /// The game's folder itself.
-    Folder,
-}
-
-/// Disc descriptions that name the tracks next to them, in order of preference.
-const DISC_INDEXES: &[&str] = &["m3u", "cue", "gdi", "ccd", "mds", "toc"];
-
-/// Disc images complete in themselves; several of them make a multi-disc game.
-const DISC_IMAGES: &[&str] = &["chd", "pbp", "cso", "zso", "cdi", "iso", "rvz", "wbfs"];
-
-/// Files that accompany the file a frontend starts: tracks, MSU-1 audio, notes, checksums.
-const COMPANIONS: &[&str] = &[
-    "bin", "raw", "img", "sub", "wav", "mp3", "ogg", "pcm", "msu", "bml", "xml", "txt", "nfo",
-    "md5", "sfv", "png", "jpg", "pdf",
-];
 
 impl RomDetail {
     /// Where `file` belongs inside the game's folder, e.g. `track01.iso` or `data/Stage/0.pxa`.
@@ -153,54 +128,14 @@ impl RomDetail {
         if !self.has_multiple_files {
             return Some(Start::File(self.files.first()?.file_name.clone()));
         }
-        // RomM takes the extension from the folder name; `Game (v1.1)` yields `1)`.
-        let ext = &self.fs_extension;
-        if !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
-            return Some(Start::Folder);
-        }
-        let mut top: Vec<&str> = self
+        let top: Vec<&str> = self
             .files
             .iter()
             .filter(|f| self.relative_path(f).is_ok_and(|p| !p.contains('/')))
             .map(|f| f.file_name.as_str())
             .collect();
-        top.sort_unstable();
-        let with = |exts: &[&str]| -> Vec<&str> {
-            top.iter()
-                .copied()
-                .filter(|name| exts.contains(&extension(name).as_str()))
-                .collect()
-        };
-        for index in DISC_INDEXES {
-            if let Some(file) = with(&[index]).first() {
-                return Some(Start::File((*file).to_owned()));
-            }
-        }
-        let images = with(DISC_IMAGES);
-        match images.len() {
-            0 => {}
-            1 => return Some(Start::File(images[0].to_owned())),
-            _ => {
-                return Some(Start::Playlist(
-                    images.into_iter().map(String::from).collect(),
-                ));
-            }
-        }
-        let mut rest = top
-            .iter()
-            .filter(|name| !COMPANIONS.contains(&extension(name).as_str()));
-        match (rest.next(), rest.next()) {
-            (Some(file), None) => Some(Start::File((*file).to_owned())),
-            _ => None,
-        }
+        start::of(&self.fs_name, &top)
     }
-}
-
-/// The lowercase extension of a file name; empty without one.
-fn extension(name: &str) -> String {
-    name.rsplit_once('.')
-        .map(|(_, e)| e.to_lowercase())
-        .unwrap_or_default()
 }
 
 #[derive(Deserialize)]

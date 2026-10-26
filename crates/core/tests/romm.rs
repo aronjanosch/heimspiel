@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use common::{FakeServer, Response};
 use heimspiel_core::library::{FileLocation, Launch, Layout, SourceKind};
-use heimspiel_core::romm::{RomDetail, Romm, Start};
+use heimspiel_core::romm::{RomDetail, Romm};
 use heimspiel_core::source::romm;
+use heimspiel_core::start::Start;
 
 const PLATFORMS: &str = r#"[
     {"id": 52, "slug": "n64", "fs_slug": "n64", "name": "Nintendo 64", "rom_count": 3},

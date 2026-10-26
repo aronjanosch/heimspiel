@@ -1,6 +1,7 @@
 //! ES-DE: per Entry a `.desktop` file (PC games) or a Placeholder (game files) in the system's ROM
 //! folder, plus its `gamelist.xml` entry and cover. A RomM game made of several files becomes a
-//! folder that ES-DE treats as one game (its "directories interpreted as files").
+//! folder that ES-DE treats as one game (its "directories interpreted as files"); so does a local
+//! game of several files, as a folder of links to them.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +12,7 @@ use anyhow::Context;
 use xmltree::{Element, EmitterConfig, XMLNode};
 
 use crate::library::{Entry, FileLocation, Launch, Layout, Library, Metadata, SourceKind};
+use crate::start::Start;
 
 /// The folders of one ES-DE installation.
 pub struct EsDe {
@@ -169,6 +171,7 @@ impl EsDe {
                             }
                         }
                         FileLocation::Local { path } => Content::Link(path),
+                        FileLocation::LocalFolder { path, start } => Content::Links { path, start },
                     };
                     (stem, ext, content)
                 }
@@ -207,6 +210,10 @@ impl EsDe {
                 Content::Link(target) => {
                     clear_other_kind(&path, false)?;
                     link(&path, target)?;
+                }
+                Content::Links { path: game, start } => {
+                    clear_other_kind(&path, true)?;
+                    link_folder(&path, &file, game, start)?;
                 }
             }
             if let Some(cover) = &entry.cover {
@@ -349,8 +356,11 @@ pub(crate) fn placeholder(rom_id: u64) -> String {
 }
 
 /// Hidden file in the folders heimspiel writes for games made of several files, holding the
-/// game's Placeholder text. ES-DE skips hidden files.
+/// game's Placeholder text, or [`LOCAL_MARKER`] for a local game. ES-DE skips hidden files.
 pub(crate) const FOLDER_MARKER: &str = ".heimspiel";
+
+/// What the [`FOLDER_MARKER`] of a local game holds.
+const LOCAL_MARKER: &str = "heimspiel-placeholder local\n";
 
 /// The ES-DE system an Entry goes into.
 fn system(entry: &Entry) -> String {
@@ -410,6 +420,45 @@ enum Content<'a> {
         start: bool,
     },
     Link(&'a Path),
+    /// A marked folder of links to the files in `path`; ES-DE starts the entry named like the
+    /// folder, a link or a playlist that heimspiel writes.
+    Links {
+        path: &'a Path,
+        start: &'a Start,
+    },
+}
+
+/// Fills `dir`, named `file`, with links to the files of the local game in `game`, and drops links
+/// to files that are gone.
+fn link_folder(dir: &Path, file: &str, game: &Path, start: &Start) -> anyhow::Result<()> {
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    write_if_changed(&dir.join(FOLDER_MARKER), LOCAL_MARKER.as_bytes())?;
+    // The entry ES-DE starts, named like the folder; a folder opened as a whole has none.
+    let started = (*start != Start::Folder).then_some(file);
+    let mut kept = vec![FOLDER_MARKER.to_owned()];
+    kept.extend(started.map(str::to_owned));
+    for item in fs::read_dir(game).with_context(|| format!("reading {}", game.display()))? {
+        let name = item?.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.') && Some(name.as_str()) != started {
+            link(&dir.join(&name), &game.join(&name))?;
+            kept.push(name);
+        }
+    }
+    match start {
+        Start::File(name) => link(&dir.join(file), &game.join(name))?,
+        Start::Playlist(discs) => {
+            let text: String = discs.iter().map(|d| format!("{d}\n")).collect();
+            write_if_changed(&dir.join(file), text.as_bytes())?;
+        }
+        Start::Folder => {}
+    }
+    for item in fs::read_dir(dir)? {
+        let name = item?.file_name().to_string_lossy().into_owned();
+        if !kept.contains(&name) {
+            remove_own(&dir.join(&name))?;
+        }
+    }
+    Ok(())
 }
 
 /// Removes what heimspiel wrote at `path` if it is a folder and should not be, or the other way
@@ -421,8 +470,8 @@ fn clear_other_kind(path: &Path, folder: bool) -> anyhow::Result<()> {
     }
 }
 
-/// Removes a file, link or folder that heimspiel wrote. Its folders hold only links into the
-/// cache and Placeholders, never game files.
+/// Removes a file, link or folder that heimspiel wrote. Its folders hold only links, Placeholders
+/// and playlists, never game files.
 fn remove_own(path: &Path) -> anyhow::Result<()> {
     if fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
         fs::remove_dir_all(path)

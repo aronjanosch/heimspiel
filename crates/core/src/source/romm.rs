@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::library::{Entry, FileLocation, Identity, Launch, Layout, Metadata, SourceKind};
-use crate::romm::{Rom, Romm, Start};
+use crate::romm::{Rom, Romm};
+use crate::start::Start;
 
 /// Files RomM keeps next to games that are not games: saves, screenshots, notes.
 const NOT_GAMES: &[&str] = &[
@@ -55,19 +56,14 @@ fn placement(client: &Romm, rom: &Rom) -> anyhow::Result<Option<(String, Layout)
     if !rom.has_multiple_files {
         return Ok(Some((rom.fs_name.clone(), Layout::File)));
     }
-    let extension = match client.rom(rom.id)?.start() {
-        None => return Ok(None),
-        Some(Start::Folder) => return Ok(Some((rom.fs_name.clone(), Layout::Folder))),
-        Some(Start::File(file)) => match file.rsplit_once('.') {
-            Some((_, extension)) => extension.to_owned(),
-            None => return Ok(None),
-        },
-        Some(Start::Playlist(_)) => "m3u".to_owned(),
+    let Some(start) = client.rom(rom.id)?.start() else {
+        return Ok(None);
     };
-    Ok(Some((
-        format!("{}.{extension}", rom.fs_name),
-        Layout::StartInFolder,
-    )))
+    let layout = match start {
+        Start::Folder => Layout::Folder,
+        Start::File(_) | Start::Playlist(_) => Layout::StartInFolder,
+    };
+    Ok(start.name(&rom.fs_name).map(|name| (name, layout)))
 }
 
 fn entry(

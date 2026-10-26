@@ -7,7 +7,8 @@ use anyhow::Context;
 
 use crate::cache::GameCache;
 use crate::progress::Progress;
-use crate::romm::{RomDetail, Romm, Start};
+use crate::romm::{RomDetail, Romm};
+use crate::start::Start;
 
 pub struct Fetch<'a> {
     pub client: &'a Romm,

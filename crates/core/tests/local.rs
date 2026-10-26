@@ -4,6 +4,7 @@ use std::path::Path;
 use heimspiel_core::library::{FileLocation, Launch, SourceKind};
 use heimspiel_core::n64;
 use heimspiel_core::source::local;
+use heimspiel_core::start::Start;
 
 #[test]
 fn reads_games_from_platform_folders() {
@@ -44,6 +45,73 @@ fn skips_saves_hidden_files_and_subfolders() {
 
     let titles: Vec<_> = entries.iter().map(|e| e.title.as_str()).collect();
     assert_eq!(titles, ["Zelda"]);
+}
+
+#[test]
+fn reads_games_of_several_files_from_folders_of_their_own() {
+    let tmp = tempfile::tempdir().unwrap();
+    let psx = tmp.path().join("psx");
+    let games: &[(&str, &[&str])] = &[
+        (
+            "Crash",
+            &["Crash.cue", "Crash (Track 1).bin", "Crash (Track 2).bin"],
+        ),
+        ("Riven", &["Riven (Disc 2).chd", "Riven (Disc 1).chd"]),
+        ("Tentacle.svm", &["tentacle.000"]),
+        ("boxart", &["crash.png", "riven.png"]),
+    ];
+    for (folder, files) in games {
+        fs::create_dir_all(psx.join(folder)).unwrap();
+        for file in *files {
+            fs::write(psx.join(folder).join(file), b"x").unwrap();
+        }
+    }
+
+    let entries =
+        local::entries(&[tmp.path().to_path_buf()], &tmp.path().join("hashes.json")).unwrap();
+
+    let found: Vec<_> = entries
+        .iter()
+        .map(|e| match &e.launch {
+            Launch::File {
+                file_name,
+                location: FileLocation::LocalFolder { path, start },
+                ..
+            } => (
+                e.title.as_str(),
+                file_name.as_str(),
+                path.clone(),
+                start.clone(),
+            ),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (
+                "Crash",
+                "Crash.cue",
+                psx.join("Crash"),
+                Start::File("Crash.cue".into())
+            ),
+            (
+                "Riven",
+                "Riven.m3u",
+                psx.join("Riven"),
+                Start::Playlist(vec![
+                    "Riven (Disc 1).chd".into(),
+                    "Riven (Disc 2).chd".into()
+                ])
+            ),
+            (
+                "Tentacle",
+                "Tentacle.svm",
+                psx.join("Tentacle.svm"),
+                Start::Folder
+            ),
+        ]
+    );
 }
 
 #[test]

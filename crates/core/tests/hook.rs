@@ -206,9 +206,18 @@ fn leaves_every_other_game_alone_without_asking_romm() {
     fs::write(&real, vec![0x80u8; 4096]).unwrap();
     let folder = s.tmp.path().join("ROMs/ps3/Real Game.ps3");
     fs::create_dir_all(&folder).unwrap();
+    // A local game of several files, as `heimspiel sync` links it.
+    let local = s.tmp.path().join("Archive/psx/Crash/Crash.cue");
+    fs::create_dir_all(local.parent().unwrap()).unwrap();
+    fs::write(&local, b"cue").unwrap();
+    let linked = s.tmp.path().join("ROMs/psx/Crash.cue");
+    fs::create_dir_all(&linked).unwrap();
+    fs::write(linked.join(".heimspiel"), "heimspiel-placeholder local\n").unwrap();
+    symlink(&local, linked.join("Crash.cue")).unwrap();
 
     run(&s, &server, &escaped(&real), u64::MAX).unwrap();
     run(&s, &server, &escaped(&folder), u64::MAX).unwrap();
+    run(&s, &server, &escaped(&linked.join("Crash.cue")), u64::MAX).unwrap();
     // ES-DE passes the expanded Exec line for .desktop games.
     run(&s, &server, "steam steam://rungameid/590380", u64::MAX).unwrap();
 

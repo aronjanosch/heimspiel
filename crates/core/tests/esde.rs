@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use heimspiel_core::library::{Entry, FileLocation, Launch, Layout, Library, Metadata, SourceKind};
 use heimspiel_core::output::esde::EsDe;
+use heimspiel_core::source::local;
 
 struct Setup {
     _tmp: tempfile::TempDir,
@@ -498,4 +499,74 @@ fn links_local_games_and_removes_only_the_link() {
 
     assert!(fs::symlink_metadata(&link).is_err());
     assert_eq!(fs::read(&file).unwrap(), b"rom");
+}
+
+#[test]
+fn links_local_games_of_several_files_as_folders_es_de_starts() {
+    let s = setup();
+    let folder = s.home.parent().unwrap().join("Archive");
+    let games: &[(&str, &[&str])] = &[
+        (
+            "Crash",
+            &["Crash.cue", "Crash (Track 1).bin", "Crash (Track 2).bin"],
+        ),
+        ("Riven", &["Riven (Disc 1).chd", "Riven (Disc 2).chd"]),
+        ("Tentacle.svm", &["tentacle.000"]),
+    ];
+    for (game, files) in games {
+        fs::create_dir_all(folder.join("psx").join(game)).unwrap();
+        for file in *files {
+            fs::write(folder.join("psx").join(game).join(file), b"x").unwrap();
+        }
+    }
+    let esde = EsDe::locate(&s.home, s.home.parent().unwrap())
+        .unwrap()
+        .local_folder(&folder);
+    let lib = || {
+        library(
+            local::entries(std::slice::from_ref(&folder), &folder.join(".hashes.json")).unwrap(),
+        )
+    };
+
+    esde.write(&lib()).unwrap();
+    esde.write(&lib()).unwrap();
+
+    let psx = s.roms.join("psx");
+    let crash = psx.join("Crash.cue");
+    assert_eq!(
+        fs::read_link(crash.join("Crash.cue")).unwrap(),
+        folder.join("psx/Crash/Crash.cue")
+    );
+    assert_eq!(
+        fs::read_link(crash.join("Crash (Track 2).bin")).unwrap(),
+        folder.join("psx/Crash/Crash (Track 2).bin")
+    );
+    assert_eq!(
+        read(psx.join("Riven.m3u/Riven.m3u")),
+        "Riven (Disc 1).chd\nRiven (Disc 2).chd\n"
+    );
+    assert!(fs::read_link(psx.join("Riven.m3u/Riven (Disc 2).chd")).is_ok());
+    let tentacle: Vec<_> = fs::read_dir(psx.join("Tentacle.svm"))
+        .unwrap()
+        .map(|i| i.unwrap().file_name().into_string().unwrap())
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    assert_eq!(tentacle, ["tentacle.000"]);
+    let gamelist = read(s.home.join("gamelists/psx/gamelist.xml"));
+    assert!(gamelist.contains("<path>./Crash.cue</path>"));
+    assert!(gamelist.contains("<path>./Riven.m3u</path>"));
+
+    // A track the user deleted loses its link.
+    fs::remove_file(folder.join("psx/Crash/Crash (Track 2).bin")).unwrap();
+    esde.write(&lib()).unwrap();
+    assert!(fs::symlink_metadata(crash.join("Crash (Track 2).bin")).is_err());
+    assert!(fs::read_link(crash.join("Crash (Track 1).bin")).is_ok());
+
+    esde.write(&library(vec![])).unwrap();
+
+    assert!(!crash.exists() && !psx.join("Riven.m3u").exists());
+    assert_eq!(
+        fs::read(folder.join("psx/Riven/Riven (Disc 1).chd")).unwrap(),
+        b"x"
+    );
 }

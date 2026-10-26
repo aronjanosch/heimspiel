@@ -30,7 +30,8 @@ pub struct DumpsConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LocalConfig {
-    /// Folders with one subfolder per platform, named by RomM's slugs: `<folder>/n64/…`.
+    /// Folders with one subfolder per platform, named by RomM's slugs: `<folder>/n64/…`. A game
+    /// of several files has a folder of its own there: `<folder>/psx/Riven/Riven (Disc 1).chd`.
     pub folders: Vec<PathBuf>,
 }
 

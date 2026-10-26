@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::start::Start;
+
 /// All Entries heimspiel knows about.
 #[derive(Debug, Default)]
 pub struct Library {
@@ -56,6 +58,8 @@ pub enum FileLocation {
     RomM { rom_id: u64, layout: Layout },
     /// In a local folder.
     Local { path: PathBuf },
+    /// A game of several files in their own folder inside a local folder.
+    LocalFolder { path: PathBuf, start: Start },
 }
 
 /// How the files of a game fetched from RomM are laid out where a frontend looks for games.

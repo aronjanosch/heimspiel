@@ -38,6 +38,7 @@ platforms = ["n64", "snes", "gba"]   # RomM platform slugs
 
 [local]
 # folders with one subfolder per RomM platform slug, e.g. ~/Games/ROMs/n64/;
+# a game of several files (cue+bin, gdi, discs) gets a folder of its own in there;
 # no RomM needed: N64 ROMs here are recognised as Port originals by their hash
 folders = ["~/Games/ROMs"]
 

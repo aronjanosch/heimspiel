@@ -394,3 +394,29 @@ fn ignores_local_roms_of_another_release_or_platform() {
 
     assert_eq!(port::original(&manifest, &library, &[]), None);
 }
+
+#[test]
+fn names_copies_of_the_game_in_a_release_the_port_does_not_accept() {
+    let manifest = Manifest::parse(MANIFEST).unwrap();
+    let library = Library {
+        entries: vec![
+            romm(1, 1030, "Europe", None),
+            romm(2, 1030, "USA", Some("A")),
+            // Another game.
+            romm(3, 1029, "Europe", None),
+        ],
+    };
+    let manifests = [manifest];
+
+    let overview = port::overview(&manifests, &library, &[], &[], &|_| false);
+
+    let state = &overview.manifests[0];
+    assert_eq!(state.original, None);
+    assert_eq!(
+        state.other_releases,
+        [
+            "The Legend of Zelda: Majora's Mask (RomM, Europe)",
+            "The Legend of Zelda: Majora's Mask (RomM, USA Rev A)"
+        ]
+    );
+}

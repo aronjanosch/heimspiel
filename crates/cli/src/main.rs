@@ -146,7 +146,14 @@ fn main() -> anyhow::Result<()> {
                     (Some(original), false) => {
                         format!("installs on first start; Original: {original}")
                     }
-                    (None, _) => format!("needs {}", needed(state.manifest)),
+                    (None, _) if state.other_releases.is_empty() => {
+                        format!("needs {}", needed(state.manifest))
+                    }
+                    (None, _) => format!(
+                        "needs {}; you have another release: {}",
+                        needed(state.manifest),
+                        state.other_releases.join(", ")
+                    ),
                 };
                 println!("  {}: {status}", state.manifest.title);
             }

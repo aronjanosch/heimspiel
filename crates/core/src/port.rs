@@ -346,6 +346,9 @@ pub struct ManifestState<'a> {
     pub manifest: &'a Manifest,
     /// The Original found for it, as `Title (RomM)` or `Title (Dump CUSA02320)`.
     pub original: Option<String>,
+    /// Copies of the Original's game in a release the Port does not accept, as
+    /// `Title (RomM, Europe)`; empty once the Original is found.
+    pub other_releases: Vec<String>,
     pub installed: bool,
 }
 
@@ -378,9 +381,15 @@ pub fn overview<'a>(
                     .find(|d| manifest.original.accepts(d))
                     .map(|d| format!("{} (Dump {})", d.title, d.title_id))
             };
+            let original = from_library.or_else(from_dump);
+            let other_releases = match original {
+                Some(_) => Vec::new(),
+                None => other_releases(&manifest.original, library),
+            };
             ManifestState {
                 manifest,
-                original: from_library.or_else(from_dump),
+                original,
+                other_releases,
                 installed: installed(&manifest.quiver),
             }
         })
@@ -453,6 +462,33 @@ fn local_original<'a>(entry: &'a Entry, manifest: &Manifest) -> Option<&'a Path>
     };
     let rom = entry.identity.rom.as_ref()?;
     (*platform == manifest.original.platform && manifest.provide.accepts(rom)).then_some(path)
+}
+
+/// The RomM games with the IGDB id of `original` in a release it does not name, as
+/// `Title (RomM, USA Rev A)`.
+fn other_releases(original: &Original, library: &Library) -> Vec<String> {
+    library
+        .entries
+        .iter()
+        .filter(|e| {
+            matches!(&e.launch, Launch::File { platform, location: FileLocation::RomM { .. }, .. }
+                if *platform == original.platform)
+                && original.igdb_id.is_some()
+                && e.identity.igdb_id == original.igdb_id
+                && romm_original(e, original).is_none()
+        })
+        .map(|e| {
+            let id = &e.identity;
+            let mut release = match id.regions.as_slice() {
+                [] => "no region".to_owned(),
+                regions => regions.join("/"),
+            };
+            if let Some(revision) = &id.revision {
+                release.push_str(&format!(" Rev {revision}"));
+            }
+            format!("{} (RomM, {release})", e.title)
+        })
+        .collect()
 }
 
 /// The RomM id of `entry` if it is the release `original` names.

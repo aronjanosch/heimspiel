@@ -17,8 +17,8 @@ Heimspiel does not replace these projects. It installs, configures and connects 
 
 Early. `heimspiel sync` already fills ES-DE from Steam, Heroic, hand-picked `.desktop` files, a RomM
 server and local folders, and offers the Ports whose originals you own: Zelda 64: Recompiled, Banjo:
-Recompiled and Ship of Harkinian from RomM ROMs, Uncharted: The Nathan Drake Collection from a PS4
-dump. The setup wizard is still to come. Linux first, Windows later.
+Recompiled, Ship of Harkinian and more from N64 ROMs in RomM or a local folder, Uncharted: The Nathan
+Drake Collection from a PS4 dump. The setup wizard is still to come. Linux first, Windows later.
 
 ## Usage
 
@@ -37,7 +37,8 @@ platforms = ["n64", "snes", "gba"]   # RomM platform slugs
 # cache-limit-gib = 50
 
 [local]
-# folders with one subfolder per RomM platform slug, e.g. ~/Games/ROMs/n64/
+# folders with one subfolder per RomM platform slug, e.g. ~/Games/ROMs/n64/;
+# no RomM needed: N64 ROMs here are recognised as Port originals by their hash
 folders = ["~/Games/ROMs"]
 
 [dumps]

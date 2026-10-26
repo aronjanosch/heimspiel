@@ -58,6 +58,9 @@ enum Command {
         /// RomM id of the Original.
         #[arg(long, group = "original")]
         romm: Option<u64>,
+        /// ROM file that is the Original.
+        #[arg(long, group = "original")]
+        file: Option<PathBuf>,
         /// Folder of the Dump that is the Original.
         #[arg(long, group = "original")]
         dump: Option<PathBuf>,
@@ -184,13 +187,15 @@ fn main() -> anyhow::Result<()> {
         Command::Launch {
             port,
             romm: rom_id,
+            file,
             dump,
             game,
         } => {
-            let original = match (rom_id, dump) {
-                (Some(rom_id), _) => OriginalLocation::RomM(rom_id),
-                (None, Some(dump)) => OriginalLocation::Dump(std::path::absolute(dump)?),
-                (None, None) => unreachable!("clap requires one"),
+            let original = match (rom_id, file, dump) {
+                (Some(rom_id), _, _) => OriginalLocation::RomM(rom_id),
+                (_, Some(file), _) => OriginalLocation::File(std::path::absolute(file)?),
+                (_, _, Some(dump)) => OriginalLocation::Dump(std::path::absolute(dump)?),
+                (None, None, None) => unreachable!("clap requires one"),
             };
             let progress = progress();
             let result = with_port_launch(&config, &env, &*progress, &[], |ctx| {
@@ -318,7 +323,7 @@ fn needed(manifest: &Manifest) -> String {
         })
         .collect();
     format!(
-        "its {} Original in RomM ({})",
+        "its {} Original in RomM or a local folder ({})",
         original.platform,
         releases.join(", ")
     )

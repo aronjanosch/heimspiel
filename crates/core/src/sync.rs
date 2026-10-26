@@ -38,6 +38,11 @@ impl Env {
         self.cache_dir.join("romm/covers")
     }
 
+    /// Where `heimspiel sync` keeps the hashes of ROMs in local folders.
+    pub fn local_hash_cache(&self) -> PathBuf {
+        self.cache_dir.join("local/rom-hashes.json")
+    }
+
     /// heimspiel's own Quiver installation.
     pub fn quiver_dir(&self) -> PathBuf {
         self.data_dir.join("quiver")
@@ -162,9 +167,10 @@ pub fn read_sources(
         )?);
     }
 
-    library
-        .entries
-        .extend(local::entries(&local_folders(config, user_home))?);
+    library.entries.extend(local::entries(
+        &local_folders(config, user_home),
+        &env.local_hash_cache(),
+    )?);
 
     let dump_folders: Vec<PathBuf> = config
         .dumps

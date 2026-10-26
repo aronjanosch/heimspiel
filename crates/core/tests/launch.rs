@@ -546,3 +546,47 @@ fn fails_the_check_of_a_port_that_ends_at_once() {
 
     assert!(format!("{err:#}").contains("ended"), "{err:#}");
 }
+
+#[test]
+fn provides_a_rom_from_a_local_folder() {
+    let s = setup(Installs::Always);
+    let rom = s.tmp.path().join("ROMs/n64/Test (USA).n64");
+    fs::create_dir_all(rom.parent().unwrap()).unwrap();
+    fs::write(&rom, V64).unwrap();
+    let server = romm();
+
+    launch_with(
+        &s,
+        &server,
+        &manifest(),
+        &OriginalLocation::File(rom),
+        None,
+        Duration::from_secs(20),
+    )
+    .unwrap();
+
+    let stored = fs::read(s.config_home.join("TestRecompiled/test.n64.us.1.0.z64")).unwrap();
+    assert_eq!(stored, Z64);
+    assert!(server.requests().is_empty());
+}
+
+#[test]
+fn refuses_a_local_rom_the_port_does_not_accept() {
+    let s = setup(Installs::Always);
+    let rom = s.tmp.path().join("Other (USA).z64");
+    fs::write(&rom, [0x80, 0x37, 0x12, 0x40, 9, 9, 9, 9]).unwrap();
+    let server = romm();
+
+    let err = launch_with(
+        &s,
+        &server,
+        &manifest(),
+        &OriginalLocation::File(rom),
+        None,
+        Duration::from_secs(20),
+    )
+    .unwrap_err();
+
+    assert!(format!("{err:#}").contains("not a release"), "{err:#}");
+    assert!(calls(&s).is_empty());
+}

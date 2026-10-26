@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use heimspiel_core::catalog::CatalogPort;
 use heimspiel_core::dump;
 use heimspiel_core::library::{
-    Entry, FileLocation, Identity, Launch, Layout, Library, Metadata, SourceKind,
+    Entry, FileLocation, Identity, Launch, Layout, Library, Metadata, RomHashes, SourceKind,
 };
 use heimspiel_core::port::{self, Manifest, OriginalLocation, Provide};
 
@@ -49,9 +49,36 @@ fn romm(rom_id: u64, igdb_id: u64, region: &str, revision: Option<&str>) -> Entr
             igdb_id: Some(igdb_id),
             regions: vec![region.into()],
             revision: revision.map(Into::into),
+            rom: None,
         },
     }
 }
+
+/// A ROM in a local folder whose normalised form has this XXH3.
+fn local(path: &str, xxh3: u64) -> Entry {
+    let path = PathBuf::from(path);
+    Entry {
+        source: SourceKind::Local,
+        id: path.display().to_string(),
+        title: "Majora's Mask".into(),
+        launch: Launch::File {
+            platform: "n64".into(),
+            file_name: path.file_name().unwrap().to_string_lossy().into(),
+            location: FileLocation::Local { path },
+        },
+        cover: None,
+        metadata: Metadata::default(),
+        identity: Identity {
+            rom: Some(RomHashes {
+                xxh3,
+                sha1: String::new(),
+            }),
+            ..Default::default()
+        },
+    }
+}
+
+const MM_XXH3: u64 = 0xEF18B4A9E2386169;
 
 fn heimspiel() -> Vec<String> {
     vec!["/usr/bin/heimspiel".into()]
@@ -309,4 +336,61 @@ fn finds_where_a_ports_original_is() {
         Some(OriginalLocation::Dump(path))
     );
     assert_eq!(port::original(&collection, &library, &[]), None);
+}
+
+#[test]
+fn offers_a_port_for_a_rom_in_a_local_folder_by_its_hash() {
+    let manifest = Manifest::parse(MANIFEST).unwrap();
+    let library = Library {
+        entries: vec![
+            local("/roms/n64/Other.z64", 1),
+            local("/roms/n64/Majora's Mask (USA).z64", MM_XXH3),
+        ],
+    };
+
+    let ports = port::entries(std::slice::from_ref(&manifest), &library, &[], &heimspiel());
+
+    assert_eq!(ports.len(), 1);
+    assert_eq!(
+        ports[0].exec(),
+        Some(
+            r#"/usr/bin/heimspiel launch zelda64recomp --file "/roms/n64/Majora's Mask (USA).z64""#
+        )
+    );
+    assert_eq!(
+        port::original(&manifest, &library, &[]),
+        Some(OriginalLocation::File(
+            "/roms/n64/Majora's Mask (USA).z64".into()
+        ))
+    );
+}
+
+#[test]
+fn prefers_a_local_rom_to_one_in_romm() {
+    let manifest = Manifest::parse(MANIFEST).unwrap();
+    let library = Library {
+        entries: vec![
+            romm(3037, 1030, "USA", None),
+            local("/roms/n64/MM.z64", MM_XXH3),
+        ],
+    };
+
+    assert_eq!(
+        port::original(&manifest, &library, &[]),
+        Some(OriginalLocation::File("/roms/n64/MM.z64".into()))
+    );
+}
+
+#[test]
+fn ignores_local_roms_of_another_release_or_platform() {
+    let manifest = Manifest::parse(MANIFEST).unwrap();
+    let mut other_platform = local("/roms/snes/MM.sfc", MM_XXH3);
+    if let Launch::File { platform, .. } = &mut other_platform.launch {
+        *platform = "snes".into();
+    }
+    let library = Library {
+        entries: vec![local("/roms/n64/MM (Rev A).z64", 2), other_platform],
+    };
+
+    assert_eq!(port::original(&manifest, &library, &[]), None);
 }

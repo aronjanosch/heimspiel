@@ -11,6 +11,7 @@ pub mod fetch;
 pub mod hook;
 pub mod launch;
 pub mod library;
+pub mod n64;
 pub mod output;
 pub mod port;
 mod process;

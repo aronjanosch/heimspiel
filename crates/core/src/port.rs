@@ -2,7 +2,7 @@
 //! offered once the Library holds its Original.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use serde::Deserialize;
@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::catalog::{self, CatalogPort};
 use crate::desktop;
 use crate::dump::Dump;
-use crate::library::{Entry, FileLocation, Launch, Library, Metadata, SourceKind};
+use crate::library::{Entry, FileLocation, Launch, Library, Metadata, RomHashes, SourceKind};
 
 /// heimspiel's description of one Port.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -160,6 +160,17 @@ pub enum Provide {
     },
 }
 
+impl Provide {
+    /// Whether a ROM with these hashes is a release this Port accepts.
+    pub fn accepts(&self, rom: &RomHashes) -> bool {
+        match self {
+            Provide::Librecomp { xxh3, .. } => rom.xxh3 == *xxh3,
+            Provide::O2r { sha1, .. } => sha1.iter().any(|s| s.eq_ignore_ascii_case(&rom.sha1)),
+            Provide::Dump { .. } => false,
+        }
+    }
+}
+
 fn hex<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     let text = String::deserialize(d)?;
     u64::from_str_radix(text.trim_start_matches("0x"), 16).map_err(serde::de::Error::custom)
@@ -208,10 +219,10 @@ pub fn entries(
 ) -> Vec<Entry> {
     let mut entries = Vec::new();
     for manifest in manifests {
-        let launch = |original: &[String], game: Option<&Game>| {
+        let launch = |original: &OriginalLocation, game: Option<&Game>| {
             let mut args = heimspiel.to_vec();
             args.extend(["launch".into(), manifest.id.clone()]);
-            args.extend_from_slice(original);
+            args.extend(original.args());
             if let Some(game) = game {
                 args.extend(["--game".into(), game.id.clone()]);
             }
@@ -220,21 +231,21 @@ pub fn entries(
                 working_dir: None,
             }
         };
-        if let Some((original, rom_id)) = library
-            .entries
-            .iter()
-            .find_map(|e| Some((e, romm_original(e, &manifest.original)?)))
-        {
+        if let Some((original, location)) = in_library(manifest, library) {
+            let from = match location {
+                OriginalLocation::RomM(_) => " from RomM",
+                _ => "",
+            };
             entries.push(Entry {
                 source: SourceKind::Port,
                 id: manifest.id.clone(),
                 title: manifest.title.clone(),
-                launch: launch(&["--romm".into(), rom_id.to_string()], None),
+                launch: launch(&location, None),
                 cover: original.cover.clone(),
                 metadata: Metadata {
                     description: Some(format!(
-                        "A native PC port of {}. heimspiel installs it and provides your copy \
-                         from RomM on the first start.",
+                        "A native PC port of {}. heimspiel installs it and provides your copy{from} \
+                         on the first start.",
                         original.title
                     )),
                     ..original.metadata.clone()
@@ -242,7 +253,7 @@ pub fn entries(
                 identity: Default::default(),
             });
         } else if let Some(dump) = dumps.iter().find(|d| manifest.original.accepts(d)) {
-            let original = ["--dump".into(), dump.path.to_string_lossy().into_owned()];
+            let original = OriginalLocation::Dump(dump.path.clone());
             let icon = dump.path.join("sce_sys/icon0.png");
             let entry = |id: String, title: &str, game: Option<&Game>| Entry {
                 source: SourceKind::Port,
@@ -277,21 +288,31 @@ pub fn entries(
 pub enum OriginalLocation {
     /// A game on the RomM server, by its id.
     RomM(u64),
+    /// A ROM in a local folder.
+    File(PathBuf),
     /// A Dump folder.
     Dump(PathBuf),
 }
 
-/// Where the Original of `manifest` is: a matching RomM game in the Library, else an accepted Dump.
+impl OriginalLocation {
+    /// The arguments of `heimspiel launch` that name this Original.
+    fn args(&self) -> [String; 2] {
+        match self {
+            OriginalLocation::RomM(rom_id) => ["--romm".into(), rom_id.to_string()],
+            OriginalLocation::File(path) => ["--file".into(), path.to_string_lossy().into()],
+            OriginalLocation::Dump(path) => ["--dump".into(), path.to_string_lossy().into()],
+        }
+    }
+}
+
+/// Where the Original of `manifest` is: a matching ROM in the Library, else an accepted Dump.
 pub fn original(
     manifest: &Manifest,
     library: &Library,
     dumps: &[Dump],
 ) -> Option<OriginalLocation> {
-    library
-        .entries
-        .iter()
-        .find_map(|e| romm_original(e, &manifest.original))
-        .map(OriginalLocation::RomM)
+    in_library(manifest, library)
+        .map(|(_, location)| location)
         .or_else(|| {
             dumps
                 .iter()
@@ -336,8 +357,9 @@ pub fn overview<'a>(
     let states = manifests
         .iter()
         .map(|manifest| {
-            let from_romm = library.entries.iter().find_map(|e| {
-                romm_original(e, &manifest.original).map(|_| format!("{} (RomM)", e.title))
+            let from_library = in_library(manifest, library).map(|(e, location)| match location {
+                OriginalLocation::File(path) => format!("{} ({})", e.title, path.display()),
+                _ => format!("{} (RomM)", e.title),
             });
             let from_dump = || {
                 dumps
@@ -347,7 +369,7 @@ pub fn overview<'a>(
             };
             ManifestState {
                 manifest,
-                original: from_romm.or_else(from_dump),
+                original: from_library.or_else(from_dump),
                 installed: installed(&manifest.quiver),
             }
         })
@@ -393,6 +415,33 @@ pub fn overview<'a>(
         manifests: states,
         more,
     }
+}
+
+/// The Library's Entry that is the Original of `manifest`, and where it is. A ROM in a local
+/// folder comes before one in RomM: it needs no download.
+fn in_library<'a>(
+    manifest: &Manifest,
+    library: &'a Library,
+) -> Option<(&'a Entry, OriginalLocation)> {
+    let find = |found: &dyn Fn(&Entry) -> Option<OriginalLocation>| {
+        library.entries.iter().find_map(|e| Some((e, found(e)?)))
+    };
+    find(&|e| local_original(e, manifest).map(|path| OriginalLocation::File(path.to_owned())))
+        .or_else(|| find(&|e| romm_original(e, &manifest.original).map(OriginalLocation::RomM)))
+}
+
+/// The path of `entry` if it is a ROM in a local folder that `manifest` accepts.
+fn local_original<'a>(entry: &'a Entry, manifest: &Manifest) -> Option<&'a Path> {
+    let Launch::File {
+        platform,
+        location: FileLocation::Local { path },
+        ..
+    } = &entry.launch
+    else {
+        return None;
+    };
+    let rom = entry.identity.rom.as_ref()?;
+    (*platform == manifest.original.platform && manifest.provide.accepts(rom)).then_some(path)
 }
 
 /// The RomM id of `entry` if it is the release `original` names.

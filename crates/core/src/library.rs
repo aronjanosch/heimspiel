@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 /// All Entries heimspiel knows about.
 #[derive(Debug, Default)]
 pub struct Library {
@@ -88,6 +90,16 @@ pub struct Identity {
     pub regions: Vec<String>,
     /// Revision of the release, e.g. `A` for "Rev A"; `None` for the first release.
     pub revision: Option<String>,
+    /// Hashes of a ROM in a local folder, for Sources without an IGDB id.
+    pub rom: Option<RomHashes>,
+}
+
+/// Hashes of a ROM in the form Ports check it (see [`crate::n64`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomHashes {
+    pub xxh3: u64,
+    /// Lower-case hex.
+    pub sha1: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

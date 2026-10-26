@@ -14,6 +14,7 @@ use anyhow::{Context, bail};
 
 use crate::dump;
 use crate::fetch::Fetch;
+use crate::n64;
 pub use crate::port::OriginalLocation;
 use crate::port::{Manifest, QuiverApp, Runner};
 use crate::process::stop;
@@ -136,9 +137,20 @@ fn prepare(
         .iter()
         .find(|m| m.id == port_id)
         .with_context(|| format!("no Port called {port_id}"))?;
-    // A Dump is checked before anything is installed: heimspiel cannot fetch a missing one.
-    if let OriginalLocation::Dump(path) = original {
-        manifest.original.check(&dump::read(path)?)?;
+    // Originals on this machine are checked before anything is installed: heimspiel cannot fetch
+    // another one.
+    match original {
+        OriginalLocation::Dump(path) => manifest.original.check(&dump::read(path)?)?,
+        OriginalLocation::File(path) => {
+            if !manifest.provide.accepts(&n64::hashes(&n64::read(path)?)) {
+                bail!(
+                    "{} is not a release {} accepts",
+                    path.display(),
+                    manifest.title
+                );
+            }
+        }
+        OriginalLocation::RomM(_) => {}
     }
     let app = &manifest.quiver;
     if ctx.quiver.is_installed(app) {
@@ -170,16 +182,20 @@ fn prepare(
             }
         }
     }
+    let port = || {
+        ctx.quiver
+            .executable(app)
+            .map(|exe| wrap(&Command::new(exe), ctx.wrapper))
+    };
     match original {
         OriginalLocation::RomM(rom_id) => {
             let fetch = ctx
                 .fetch
                 .context("this Port's Original is in RomM; set up [romm]")?;
-            let port = ctx
-                .quiver
-                .executable(app)
-                .map(|exe| wrap(&Command::new(exe), ctx.wrapper));
-            provision::provide(&manifest.provide, ctx.homes, port, || fetch.game(*rom_id))?;
+            provision::provide(&manifest.provide, ctx.homes, port(), || fetch.game(*rom_id))?;
+        }
+        OriginalLocation::File(path) => {
+            provision::provide(&manifest.provide, ctx.homes, port(), || Ok(path.clone()))?;
         }
         OriginalLocation::Dump(path) => {
             provision::provide_dump(&manifest.provide, &ctx.quiver.prefix(app), path, game)?;

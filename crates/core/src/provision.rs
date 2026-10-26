@@ -8,12 +8,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, bail};
-use sha1::{Digest, Sha1};
-use xxhash_rust::xxh3::xxh3_64;
-
+use crate::n64;
 use crate::port::Provide;
 use crate::process::stop;
+use anyhow::{Context, bail};
 
 /// The user's base folders; tests point them elsewhere.
 pub struct Homes {
@@ -39,12 +37,12 @@ pub fn provide(
             xxh3,
         } => {
             let target = homes.config.join(config_dir).join(format!("{game_id}.z64"));
-            if fs::read(&target).is_ok_and(|bytes| xxh3_64(&bytes) == *xxh3) {
+            if fs::read(&target).is_ok_and(|bytes| n64::hashes(&bytes).xxh3 == *xxh3) {
                 return Ok(());
             }
             let (original, rom) = read_rom(fetch_original)?;
             // librecomp deletes a stored ROM with the wrong hash, so only a verified copy goes in.
-            let actual = xxh3_64(&rom);
+            let actual = n64::hashes(&rom).xxh3;
             if actual != *xxh3 {
                 bail!(
                     "{} does not match the release this Port needs (XXH3 {actual:016x}, expected {xxh3:016x})",
@@ -59,7 +57,7 @@ pub fn provide(
                 return Ok(());
             }
             let (original, rom) = read_rom(fetch_original)?;
-            let actual = format!("{:x}", Sha1::digest(&rom));
+            let actual = n64::hashes(&rom).sha1;
             if !sha1.iter().any(|s| s.eq_ignore_ascii_case(&actual)) {
                 bail!(
                     "{} does not match a release this Port supports (SHA-1 {actual})",
@@ -124,9 +122,7 @@ fn read_rom(
     fetch_original: impl FnOnce() -> anyhow::Result<PathBuf>,
 ) -> anyhow::Result<(PathBuf, Vec<u8>)> {
     let original = fetch_original()?;
-    let mut rom = fs::read(&original).with_context(|| format!("reading {}", original.display()))?;
-    to_big_endian(&mut rom).with_context(|| format!("reading {}", original.display()))?;
-    rom.resize(rom.len().next_multiple_of(4), 0);
+    let rom = n64::read(&original)?;
     Ok((original, rom))
 }
 
@@ -200,24 +196,4 @@ pub fn ship_home(spec: &Provide, homes: &Homes) -> Option<PathBuf> {
         Provide::O2r { archive, .. } => homes.data.join(archive).parent().map(Path::to_path_buf),
         _ => None,
     }
-}
-
-/// Brings an N64 ROM into big-endian (z64) order, detected from its header rather than its name:
-/// RomM serves byte-swapped (v64) files named `.n64`.
-fn to_big_endian(rom: &mut [u8]) -> anyhow::Result<()> {
-    match rom.get(..4) {
-        Some([0x80, 0x37, 0x12, 0x40]) => {}
-        Some([0x37, 0x80, 0x40, 0x12]) => rom
-            .as_chunks_mut::<2>()
-            .0
-            .iter_mut()
-            .for_each(|pair| pair.swap(0, 1)),
-        Some([0x40, 0x12, 0x37, 0x80]) => rom
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .for_each(|word| word.reverse()),
-        _ => bail!("not an N64 ROM"),
-    }
-    Ok(())
 }

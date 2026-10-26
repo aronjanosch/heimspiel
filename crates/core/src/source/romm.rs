@@ -82,6 +82,7 @@ fn entry(
         igdb_id: rom.igdb_id,
         regions: rom.regions,
         revision: rom.revision.filter(|r| !r.is_empty()),
+        rom: None,
     };
     Entry {
         source: SourceKind::RomM,
